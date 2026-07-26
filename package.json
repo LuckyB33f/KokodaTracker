@@ -1,0 +1,38 @@
+{
+  "name": "kokoda-tracker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "emulators": "firebase emulators:start --only auth,firestore",
+    "deploy:rules": "firebase deploy --only firestore:rules",
+    "deploy:hosting": "npm run build && firebase deploy --only hosting"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.13.5",
+    "@emotion/styled": "^11.13.5",
+    "@mui/icons-material": "^5.16.9",
+    "@mui/material": "^5.16.9",
+    "@reduxjs/toolkit": "^2.5.0",
+    "firebase": "^11.1.0",
+    "formik": "^2.4.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-redux": "^9.2.0",
+    "react-router-dom": "^6.28.0",
+    "yup": "^1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "firebase-tools": "^13.29.1",
+    "typescript": "~5.6.3",
+    "vite": "^6.0.3",
+    "vite-plugin-pwa": "^0.21.1"
+  }
+}

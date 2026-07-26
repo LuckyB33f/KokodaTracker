@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // F1: users may only touch their own profile doc, with exactly the
+    // MVP-SPEC §2.3 fields. Team/session/plan rules ship with F2 (spec §5).
+    match /users/{uid} {
+      allow read, update, delete: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['activeTeamId', 'units', 'theme', 'createdAt']);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
