@@ -10,6 +10,15 @@ export interface ApiError {
 export const baseApi = createApi({
   reducerPath: 'api',
   baseQuery: fakeBaseQuery<ApiError>(),
-  tagTypes: ['UserProfile'],
+  tagTypes: [
+    'UserProfile',
+    'Team',
+    'TeamMembers',
+    'Sessions',
+    'FoodLogs',
+    'Plan',
+    'Checkoffs',
+    'Suggestion',
+  ],
   endpoints: () => ({}),
 })

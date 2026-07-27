@@ -17,11 +17,10 @@ export default function LoginPage() {
           <LoginForm />
           <Divider>or</Divider>
           <GoogleSignInButton />
-          <Typography variant="body2" align="center" color="text.secondary">
-            Default account: hello@sortadigital.com.au
-          </Typography>
-          <Typography variant="body2" align="center" color="text.secondary">
-            Password: Password123!
+          <Typography variant="body2" align="center">
+            <Link component={RouterLink} to="/register">
+              Create an account
+            </Link>
           </Typography>
           <Typography variant="body2" align="center">
             <Link component={RouterLink} to="/reset-password">

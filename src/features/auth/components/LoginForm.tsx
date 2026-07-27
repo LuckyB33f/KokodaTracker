@@ -15,8 +15,8 @@ export default function LoginForm() {
 
   const formik = useFormik<LoginFormValues>({
     initialValues: {
-      email: 'hello@sortadigital.com.au',
-      password: 'Password123!',
+      email: '',
+      password: '',
     },
     validationSchema: loginSchema,
     onSubmit: async (values) => {

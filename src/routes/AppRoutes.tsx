@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { Navigate, RouterProvider, createBrowserRouter } from 'react-router-dom'
+import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import LoadingState from '@/components/common/LoadingState'
 import AuthLayout from '@/layouts/AuthLayout'
 import MainLayout from '@/layouts/MainLayout'
@@ -8,8 +8,14 @@ import PublicOnlyRoute from './PublicOnlyRoute'
 
 // Code-split per route (NFR: TTI < 3s on 4G).
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
+const RegisterPage = lazy(() => import('@/pages/RegisterPage'))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage'))
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
+const TeamPage = lazy(() => import('@/pages/TeamPage'))
+const SessionsPage = lazy(() => import('@/pages/SessionsPage'))
+const FoodPage = lazy(() => import('@/pages/FoodPage'))
+const RecordPage = lazy(() => import('@/pages/RecordPage'))
+const PlanPage = lazy(() => import('@/pages/PlanPage'))
 const ProfilePage = lazy(() => import('@/pages/ProfilePage'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
@@ -22,7 +28,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { path: '/login', element: <LoginPage /> },
-      { path: '/register', element: <Navigate to="/login" replace /> },
+      { path: '/register', element: <RegisterPage /> },
       { path: '/reset-password', element: <ResetPasswordPage /> },
     ],
   },
@@ -34,6 +40,11 @@ const router = createBrowserRouter([
     ),
     children: [
       { path: '/', element: <DashboardPage /> },
+      { path: '/team', element: <TeamPage /> },
+      { path: '/sessions', element: <SessionsPage /> },
+      { path: '/food', element: <FoodPage /> },
+      { path: '/record', element: <RecordPage /> },
+      { path: '/plan', element: <PlanPage /> },
       { path: '/profile', element: <ProfilePage /> },
     ],
   },

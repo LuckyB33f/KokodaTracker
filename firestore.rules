@@ -1,13 +1,178 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // F1: users may only touch their own profile doc, with exactly the
-    // MVP-SPEC §2.3 fields. Team/session/plan rules ship with F2 (spec §5).
+    function signedIn() {
+      return request.auth != null;
+    }
+    function teamPath(teamId) {
+      return /databases/$(database)/documents/teams/$(teamId);
+    }
+    function isMember(teamId) {
+      return signedIn() && request.auth.uid in get(teamPath(teamId)).data.memberIds;
+    }
+    // getAfter: membership as it will be once the current batch commits —
+    // lets the join batch create the member doc it is authorising itself with.
+    function isMemberAfter(teamId) {
+      return signedIn() && request.auth.uid in getAfter(teamPath(teamId)).data.memberIds;
+    }
+    function isCaptain(teamId) {
+      return signedIn() && get(teamPath(teamId)).data.createdBy == request.auth.uid;
+    }
+
+    // F1: users may only touch their own profile doc (MVP-SPEC §2.3 fields).
     match /users/{uid} {
       allow read, update, delete: if request.auth != null && request.auth.uid == uid;
       allow create: if request.auth != null
         && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['activeTeamId', 'units', 'theme', 'createdAt']);
+    }
+
+    // F2 (§2.5 Spark design): membership is guarded here, not by a function.
+    match /teams/{teamId} {
+      allow get: if isMember(teamId);
+      allow list: if false;
+      allow delete: if false;
+
+      // Creator becomes captain and sole member, atomically with the invite doc.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'eventDistanceKm', 'eventDate', 'createdBy', 'inviteCode', 'memberIds', 'createdAt'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.memberIds == [request.auth.uid]
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 3
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.eventDistanceKm in [18, 30, 48]
+        && request.resource.data.eventDate is timestamp
+        && request.resource.data.inviteCode is string
+        && request.resource.data.inviteCode.size() == 6;
+
+      // Captain edits metadata; a joiner may only append their own uid,
+      // to a team with space (2–5 members, spec §1.2).
+      allow update: if signedIn() && (
+        (
+          isCaptain(teamId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['name', 'eventDistanceKm', 'eventDate', 'inviteCode'])
+          && request.resource.data.name.size() >= 3
+          && request.resource.data.name.size() <= 40
+          && request.resource.data.eventDistanceKm in [18, 30, 48]
+          && request.resource.data.inviteCode.size() == 6
+        ) || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds'])
+          && !(request.auth.uid in resource.data.memberIds)
+          && request.auth.uid in request.resource.data.memberIds
+          && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+          && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
+          && request.resource.data.memberIds.size() <= 5
+        )
+      );
+
+      match /members/{uid} {
+        allow read: if isMember(teamId);
+        allow delete: if false;
+        allow create: if signedIn()
+          && request.auth.uid == uid
+          && isMemberAfter(teamId)
+          && request.resource.data.keys().hasOnly(['displayName', 'photoURL', 'isCaptain', 'weeklyTargetHours', 'joinedAt'])
+          && request.resource.data.isCaptain == (getAfter(teamPath(teamId)).data.createdBy == uid);
+        allow update: if signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['displayName', 'photoURL', 'weeklyTargetHours']);
+      }
+
+      // F3: members log their own sessions; bounds mirror the Yup schemas.
+      match /sessions/{sessionId} {
+        allow read: if isMember(teamId);
+        allow create: if isMember(teamId)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['uid', 'type', 'source', 'startedAt', 'durationMin', 'distanceKm', 'elevationGainM', 'avgPaceMinPerKm', 'route', 'perceivedEffort', 'notes', 'weekKey', 'createdAt'])
+          && request.resource.data.type in ['hike', 'run', 'walk', 'stairs', 'strength', 'other']
+          && request.resource.data.source in ['gps', 'manual']
+          && request.resource.data.startedAt is timestamp
+          && request.resource.data.durationMin is number
+          && request.resource.data.durationMin >= 1
+          && request.resource.data.durationMin <= 1440
+          && (!('distanceKm' in request.resource.data) || (request.resource.data.distanceKm >= 0 && request.resource.data.distanceKm <= 100))
+          && (!('elevationGainM' in request.resource.data) || (request.resource.data.elevationGainM >= 0 && request.resource.data.elevationGainM <= 5000))
+          && request.resource.data.perceivedEffort is int
+          && request.resource.data.perceivedEffort >= 1
+          && request.resource.data.perceivedEffort <= 10
+          && (!('notes' in request.resource.data) || request.resource.data.notes.size() <= 500)
+          && request.resource.data.weekKey is string;
+        allow update: if isMember(teamId)
+          && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid;
+        allow delete: if isMember(teamId) && resource.data.uid == request.auth.uid;
+      }
+
+      // F5/F9/F10: function-written surfaces — members read, clients never
+      // write (Cloud Functions use the Admin SDK, which bypasses rules).
+      match /plans/{planId} {
+        allow read: if isMember(teamId);
+        allow write: if false;
+
+        // Members tick their own items done (F5 check-offs).
+        match /checkoffs/{checkId} {
+          allow read: if isMember(teamId);
+          allow create, update: if isMember(teamId)
+            && request.resource.data.uid == request.auth.uid
+            && checkId == request.auth.uid + '_' + string(request.resource.data.dayIndex)
+            && request.resource.data.keys().hasOnly(['uid', 'dayIndex', 'done', 'updatedAt']);
+          allow delete: if false;
+        }
+      }
+
+      match /memberMetrics/{metricId} {
+        allow read: if isMember(teamId);
+        allow write: if false;
+      }
+
+      match /suggestions/{weekKey} {
+        allow read: if isMember(teamId);
+        allow write: if false;
+      }
+
+      // F3.5: food logs, same ownership model as sessions.
+      match /foodLogs/{logId} {
+        allow read: if isMember(teamId);
+        allow create: if isMember(teamId)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['uid', 'date', 'mealType', 'description', 'calories', 'notes', 'createdAt'])
+          && request.resource.data.mealType in ['breakfast', 'lunch', 'dinner', 'snack']
+          && request.resource.data.date is string
+          && request.resource.data.date.size() == 10
+          && request.resource.data.description is string
+          && request.resource.data.description.size() >= 1
+          && request.resource.data.description.size() <= 200
+          && (!('calories' in request.resource.data) || (request.resource.data.calories is int && request.resource.data.calories >= 0 && request.resource.data.calories <= 5000))
+          && (!('notes' in request.resource.data) || request.resource.data.notes.size() <= 300);
+        allow update: if isMember(teamId)
+          && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid;
+        allow delete: if isMember(teamId) && resource.data.uid == request.auth.uid;
+      }
+    }
+
+    // §2.5: code → team lookup. Readable by any signed-in user (that is the
+    // point of a join code); writable only alongside the team it references.
+    match /invites/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow update: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['teamId', 'createdBy', 'createdAt'])
+        && request.resource.data.createdBy == request.auth.uid
+        && getAfter(teamPath(request.resource.data.teamId)).data.createdBy == request.auth.uid
+        && getAfter(teamPath(request.resource.data.teamId)).data.inviteCode == code;
+      allow delete: if signedIn()
+        && get(teamPath(resource.data.teamId)).data.createdBy == request.auth.uid;
+    }
+
+    // F10: stored forecasts, shared read-only reference data.
+    match /weather/{date} {
+      allow read: if signedIn();
+      allow write: if false;
     }
 
     match /{document=**} {

@@ -4,6 +4,11 @@ import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // PORT is set by tooling (e.g. the Claude Code preview harness); Vite
+  // otherwise defaults to 5173, which collides with other local dev servers.
+  server: {
+    port: Number(process.env.PORT) || 5174,
+  },
   plugins: [
     react(),
     VitePWA({
