@@ -105,7 +105,7 @@ export default function PlanPage() {
 
   const generate = async () => {
     setGenerateError(null)
-    const result = await generatePlan()
+    const result = await generatePlan({ teamId })
     if ('error' in result && result.error) {
       setGenerateError(
         (result.error as { message?: string }).message ??

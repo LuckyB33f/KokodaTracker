@@ -12,8 +12,6 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
 } from 'firebase/firestore'
-import { getFunctions } from 'firebase/functions'
-
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -34,8 +32,6 @@ export const db = initializeFirestore(app, {
   }),
 })
 export const googleProvider = new GoogleAuthProvider()
-// Callable functions live in the same region as Firestore (spec §2.1).
-export const functions = getFunctions(app, 'australia-southeast1')
 
 if (import.meta.env.VITE_USE_EMULATORS === 'true') {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })

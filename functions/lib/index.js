@@ -1,26 +1,29 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.suggestionJob = exports.dailyJob = exports.generatePlan = void 0;
+exports.suggestionJob = exports.dailyJob = exports.onPlanRequest = void 0;
 const v2_1 = require("firebase-functions/v2");
-const https_1 = require("firebase-functions/v2/https");
+const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const params_1 = require("firebase-functions/params");
 const firebase_functions_1 = require("firebase-functions");
-const generatePlan_1 = require("./callable/generatePlan");
+const onPlanRequest_1 = require("./triggers/onPlanRequest");
 const computeMetrics_1 = require("./jobs/computeMetrics");
 const fetchWeather_1 = require("./jobs/fetchWeather");
 const weekendSuggestion_1 = require("./jobs/weekendSuggestion");
 (0, v2_1.setGlobalOptions)({ region: 'australia-southeast1', maxInstances: 2 });
 const GEMINI_API_KEY = (0, params_1.defineSecret)('GEMINI_API_KEY');
 const WEATHER_API_KEY = (0, params_1.defineSecret)('WEATHER_API_KEY');
-// F5: captain-triggered weekly plan generation (spec §2.4).
-exports.generatePlan = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY] }, async (request) => {
-    if (!request.auth) {
-        throw new https_1.HttpsError('unauthenticated', 'Sign in first.');
-    }
-    return (0, generatePlan_1.generatePlanHandler)({
+// F5: captain-triggered weekly plan generation (spec §2.4), via a Firestore
+// request queue instead of a callable — the org's Domain Restricted Sharing
+// policy blocks the allUsers invoker grant callables require (§2.5 decision).
+exports.onPlanRequest = (0, firestore_1.onDocumentCreated)({
+    document: 'teams/{teamId}/planRequests/{requestId}',
+    secrets: [GEMINI_API_KEY],
+}, async (event) => {
+    await (0, onPlanRequest_1.handlePlanRequest)({
         geminiApiKey: GEMINI_API_KEY.value(),
-        uid: request.auth.uid,
+        teamId: event.params.teamId,
+        requestId: event.params.requestId,
     });
 });
 // Daily 5:00am Brisbane: weather fetch (F10) then metrics (F9).

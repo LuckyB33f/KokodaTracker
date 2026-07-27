@@ -9,8 +9,7 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore'
-import { httpsCallable } from 'firebase/functions'
-import { auth, db, functions } from '@/lib/firebase'
+import { auth, db } from '@/lib/firebase'
 import type {
   Checkoff,
   Plan,
@@ -134,15 +133,63 @@ export const planApi = baseApi.injectEndpoints({
       },
     }),
 
-    generatePlan: builder.mutation<{ planId: string }, void>({
-      queryFn: async () => {
+    // §2.5 org-policy-safe flow: write a rules-guarded planRequests doc, then
+    // stream it until the onPlanRequest trigger reports done/error. (Callables
+    // need an allUsers invoker grant the org policy forbids.)
+    generatePlan: builder.mutation<{ planId: string }, { teamId: string }>({
+      queryFn: async ({ teamId }) => {
         try {
-          const call = httpsCallable<void, { planId: string }>(
-            functions,
-            'generatePlan',
-          )
-          const result = await call()
-          return { data: result.data }
+          const user = auth.currentUser
+          if (!user) {
+            throw Object.assign(new Error('Sign in first.'), {
+              code: 'unauthenticated',
+            })
+          }
+          const requestRef = doc(collection(db, 'teams', teamId, 'planRequests'))
+          await setDoc(requestRef, {
+            requestedBy: user.uid,
+            status: 'pending',
+            createdAt: serverTimestamp(),
+          })
+          const planId = await new Promise<string>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              unsubscribe()
+              reject(
+                Object.assign(
+                  new Error('Plan generation timed out — try again.'),
+                  { code: 'deadline-exceeded' },
+                ),
+              )
+            }, 120_000)
+            const settle = (fn: () => void) => {
+              clearTimeout(timeout)
+              unsubscribe()
+              fn()
+            }
+            const unsubscribe = onSnapshot(
+              requestRef,
+              (snap) => {
+                const data = snap.data()
+                if (data?.status === 'done') {
+                  settle(() => resolve(data.planId as string))
+                } else if (data?.status === 'error') {
+                  settle(() =>
+                    reject(
+                      Object.assign(
+                        new Error(
+                          (data.errorMessage as string) ??
+                            'Plan generation failed. Try again.',
+                        ),
+                        { code: (data.errorCode as string) ?? 'internal' },
+                      ),
+                    ),
+                  )
+                }
+              },
+              (error) => settle(() => reject(error)),
+            )
+          })
+          return { data: { planId } }
         } catch (error) {
           return toApiError(error)
         }

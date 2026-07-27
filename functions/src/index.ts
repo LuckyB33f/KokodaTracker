@@ -1,9 +1,9 @@
 import { setGlobalOptions } from 'firebase-functions/v2'
-import { HttpsError, onCall } from 'firebase-functions/v2/https'
+import { onDocumentCreated } from 'firebase-functions/v2/firestore'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
-import { generatePlanHandler } from './callable/generatePlan'
+import { handlePlanRequest } from './triggers/onPlanRequest'
 import { computeMetrics } from './jobs/computeMetrics'
 import { fetchWeather } from './jobs/fetchWeather'
 import { weekendSuggestion } from './jobs/weekendSuggestion'
@@ -13,16 +13,19 @@ setGlobalOptions({ region: 'australia-southeast1', maxInstances: 2 })
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY')
 const WEATHER_API_KEY = defineSecret('WEATHER_API_KEY')
 
-// F5: captain-triggered weekly plan generation (spec §2.4).
-export const generatePlan = onCall(
-  { secrets: [GEMINI_API_KEY] },
-  async (request) => {
-    if (!request.auth) {
-      throw new HttpsError('unauthenticated', 'Sign in first.')
-    }
-    return generatePlanHandler({
+// F5: captain-triggered weekly plan generation (spec §2.4), via a Firestore
+// request queue instead of a callable — the org's Domain Restricted Sharing
+// policy blocks the allUsers invoker grant callables require (§2.5 decision).
+export const onPlanRequest = onDocumentCreated(
+  {
+    document: 'teams/{teamId}/planRequests/{requestId}',
+    secrets: [GEMINI_API_KEY],
+  },
+  async (event) => {
+    await handlePlanRequest({
       geminiApiKey: GEMINI_API_KEY.value(),
-      uid: request.auth.uid,
+      teamId: event.params.teamId,
+      requestId: event.params.requestId,
     })
   },
 )

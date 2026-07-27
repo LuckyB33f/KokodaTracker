@@ -14,23 +14,27 @@ Spec: [MVP-SPEC.md](MVP-SPEC.md) (v1.1). Firebase project: `kokoda-tracker-2027`
 - Firestore rules for plans/checkoffs/memberMetrics/suggestions/weather deployed.
 - Client UI built: `/plan` page (grid, check-offs, readiness chip, captain Generate button), dashboard `WeekendSuggestionCard`.
 
-## ⛔ The one blocker: generatePlan can't be invoked
+## ✅ generatePlan blocker — Option A implemented (2026-07-27 evening), deploy pending
 
-The org (`sortadigital.com.au`, id 95489675205) enforces **Domain Restricted Sharing**, which blocks the `allUsers` invoker grant that every Firebase **callable** function needs. Even `firebase deploy` fails at that step ("Failed to set the IAM Policy on the Service"). The function itself is deployed and healthy — clients just get 403 → "internal".
+Owner chose **Option A (no org-policy changes)**. Implemented and verified locally (functions tsc + 14/14 tests, web build):
+- `functions/src/triggers/onPlanRequest.ts` — `onDocumentCreated('teams/{teamId}/planRequests/{requestId}')`; transaction-claims the request (at-least-once-delivery safe), re-verifies team match, reuses `generatePlanHandler` unchanged, writes `status: done|error` (+`planId`/`errorCode`/`errorMessage`) back onto the request doc, prunes requests >7 days old.
+- `functions/src/index.ts` — callable `generatePlan` export removed; `onPlanRequest` exported with the Gemini secret.
+- `firestore.rules` — new `planRequests` block: captain-only create with exact shape `{requestedBy: uid, status: 'pending', createdAt: request.time}`; clients can never update/delete.
+- Client: `planApi.generatePlan` now writes the request doc and streams it until done/error (120s timeout); `firebase/functions` SDK removed from `src/lib/firebase.ts`; PlanPage passes `teamId`.
 
-**Decision needed (owner):**
-- **Option A (recommended): refactor to a Firestore-trigger queue.** Captain writes a rules-guarded `teams/{id}/planRequests/{reqId}` doc → `onDocumentCreated` function generates the plan (Eventarc uses a service-account invoker, org-policy safe) → client streams the result. No console changes, org policy stays intact. ~1–2h of work: new trigger function, rules for planRequests, swap the client mutation, delete the callable.
-- **Option B: override the org policy for this project.** Console → IAM & Admin → Organization Policies → "Domain restricted sharing" → override for project `kokoda-tracker-2027` → Allow all. Then: `npx firebase functions:delete generatePlan --region australia-southeast1 --force && npx firebase deploy --only functions:generatePlan` (create path sets the invoker). Keeps the callable design; weakens the org default for this project.
+**To ship it (after `firebase login` is fixed — see item 6):**
+`npx firebase deploy --only firestore:rules,functions` — the deploy will also delete the old `generatePlan` callable since it's gone from source (confirm the prompt, or add `--force`). Then browser-test on `/plan`.
 
 ## Remaining checklist
 
-1. [ ] Resolve generatePlan invocation (A or B above) → then browser-test: captain generates plan on `/plan`, grid renders, check-offs persist, regenerate supersedes, readiness "why" chip shows.
+1. [ ] Deploy Option A (`npx firebase deploy --only firestore:rules,functions`, needs login fix from item 6) → then browser-test: captain generates plan on `/plan`, grid renders, check-offs persist, regenerate supersedes, readiness "why" chip shows.
 2. [ ] `suggestionJob` produced no suggestion doc yet — it ran before the weather doc existed and exits quietly. Re-run it once (or wait for Thursday 6am):
    force-run job `firebase-schedule-suggestionJob-australia-southeast1` in Cloud Scheduler console, then check `teams/{id}/suggestions/{week}` and the dashboard card. First run also exercises the Gemini prose call.
 3. [ ] Update MVP-SPEC §7 statuses when F5/F10 pass acceptance.
 4. [ ] F4: create + referrer-restrict a Google Maps JS key → `VITE_GOOGLE_MAPS_API_KEY` in `.env.local`; then live map + session-detail route view + real 20-min walk test.
 5. [ ] Device passes: Google OAuth click-through (TD-6), airplane-mode offline, Lighthouse PWA, two-device team join.
 6. [ ] Deploy the web app: `npm run deploy:hosting` → test install on phones.
+   ⚠ 2026-07-27 (evening): deploy attempted — build passes, but this machine's Firebase CLI is logged in as `jsonbydesign@gmail.com`, which cannot see `kokoda-tracker-2027`. Run `npx firebase login:add` with the account that owns the project, then `npx firebase login:use <that-account>`, then retry.
 7. [ ] F8 stretch (FCM Friday reminder) — now feasible since Functions exist; reads active plan + F10 suggestion.
 8. [ ] Housekeeping: `firebase-functions` major upgrade warning at deploy (breaking changes — do deliberately); Node 20 runtime decommissions 2026-10-31 (upgrade `functions/package.json` engines + runtime before then); replace placeholder icons (TD-1); App Check before public launch; delete leftover gcf build images warning if it recurs.
 
