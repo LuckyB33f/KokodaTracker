@@ -26,3 +26,18 @@ export function weekKeyFor(date: Date): string {
 export function currentWeekKey(): string {
   return weekKeyFor(new Date())
 }
+
+// Mon..Sun yyyy-mm-dd strings for the current Brisbane week (manual plan grid).
+export function currentWeekDates(): string[] {
+  const [year, month, day] = brisbaneYmd
+    .format(new Date())
+    .split('-')
+    .map((part) => Number(part))
+  const monday = new Date(Date.UTC(year, month - 1, day))
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() || 7) - 1))
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday)
+    d.setUTCDate(monday.getUTCDate() + i)
+    return d.toISOString().slice(0, 10)
+  })
+}

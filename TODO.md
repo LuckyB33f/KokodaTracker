@@ -25,6 +25,25 @@ Owner chose **Option A (no org-policy changes)**. Implemented and verified local
 **To ship it (after `firebase login` is fixed — see item 6):**
 `npx firebase deploy --only firestore:rules,functions` — the deploy will also delete the old `generatePlan` callable since it's gone from source (confirm the prompt, or add `--force`). Then browser-test on `/plan`.
 
+## 2026-07-28 additions (built + tested locally, deploy pending)
+
+- **96 km event distance**: `EVENT_DISTANCES` + Yup + firestore.rules (create & update) now include 96; CreateTeamForm defaults to it.
+- **Fire-and-forget generation**: `planApi.generatePlan` now just writes the request doc and returns; new `getLatestPlanRequest` stream drives a "generating — come back in a few minutes" banner, button loading state (15-min stale guard), and error alerts on `/plan`.
+- **Manual plans**: captain-only `ManualPlanDialog` on `/plan` + `saveManualPlan` (supersede + create in one batch). New rules on `/plans`: captain may create `model: 'manual', status: 'active'` docs and flip status→superseded; everything else still function-only.
+- **Gemini output hardening**: prompt now pins exact Mon–Sun dates + valid uids; `planIssues()` semantic validation (dates in week, known uids, Saturday team hike, ≥2 rest days, rest targetValue 0) feeds the repair retry. Tests: 18/18 (`cd functions && npm test` — glob now includes `lib/callable`).
+- ⚠ Deploy needed (blocked on item 6 login fix): `npx firebase deploy --only firestore:rules,functions` — captain's team create with 96 km and the whole `/plan` flow fail until rules+functions ship.
+
+## 2026-07-28 (later): Meal system v1.2 built (F11+F12+F13) — deploy pending
+
+Spec source: `C:\Users\JasonBrowne\Downloads\MVP-SPEC_1.md` (v1.2; its F2–F10 status table is stale — repo MVP-SPEC.md stays authoritative for F1–F10). Plan file: `~/.claude/plans/c-users-jasonbrowne-downloads-mvp-spec-indexed-bubble.md`. All built + tested locally (web build ✓, functions tests 40/40 ✓):
+
+- **Settings (owner ask)**: `users/{uid}.aiMealsEnabled` toggle (master on/off for ALL AI meal features, default true, server-enforced) + `mealPrefs {mainMeals, snacks, duringTraining, macroFocus}` — Profile page "Meals" section.
+- **F11**: private `users/{uid}/meals` + `mealLibrary` (doc ID = fnv1a64(normalisedText) → offline-safe dedupe). FoodPage rewritten (quick-picker chips, drafts, completeness vs prefs), `/food/library` page. **Old team `foodLogs` feature deleted** (rules block removed; orphaned test docs remain in Firestore, unreadable).
+- **F12**: personal + team templates (`templates` subcollections, captain-curated team set, phase-keyed seed offer), session form template-first flow, meal-day templates staging drafts, save-from-history on sessions + food day.
+- **F13A**: `teams/{id}/mealPlanRequests` queue (scope self|team) → `onMealPlanRequest` trigger → Gemini → `users/{uid}/mealPlans/{weekKey}` (Zod + semantic validation + repair retry, quota 3/member/day `usage/meal_*`). `/food/plan` page + dashboard Fuelling card generate buttons.
+- **F13B**: `nutritionReviewJob` (8:30pm Brisbane, 4th scheduler) — gates: toggle off → skip; 0 logged meals → skip (no Gemini); verdict enum enforced, neutral fallback. `onMealWritten` trigger keeps `teams/{id}/fuelling/{uid}` counts live for the dashboard tile.
+- ⚠ **Deploy needed** (blocked on item 6 login): `npx firebase deploy --only firestore:rules,functions` — new functions: `onMealPlanRequest`, `nutritionReviewJob`, `onMealWritten`. Post-deploy: check `nutritionReviewJob` logs for skip lines (toggled-off / zero-meal members ⇒ zero Gemini calls, spec R13.7 acceptance).
+
 ## Remaining checklist
 
 1. [ ] Deploy Option A (`npx firebase deploy --only firestore:rules,functions`, needs login fix from item 6) → then browser-test: captain generates plan on `/plan`, grid renders, check-offs persist, regenerate supersedes, readiness "why" chip shows.

@@ -1,4 +1,4 @@
-export const EVENT_DISTANCES = [18, 30, 48] as const
+export const EVENT_DISTANCES = [18, 30, 48, 96] as const
 export type EventDistanceKm = (typeof EVENT_DISTANCES)[number]
 
 // Mirrors teams/{teamId} in MVP-SPEC §2.3. Timestamps become millis at the

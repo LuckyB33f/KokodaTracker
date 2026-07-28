@@ -12,7 +12,7 @@ export const createTeamSchema = yup.object({
   eventDistanceKm: yup
     .number()
     .required('Pick your event distance')
-    .oneOf([...EVENT_DISTANCES], 'Pick 18, 30 or 48 km'),
+    .oneOf([...EVENT_DISTANCES], 'Pick 18, 30, 48 or 96 km'),
   eventDate: yup
     .string()
     .required('Set the event date')

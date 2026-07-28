@@ -19,12 +19,65 @@ service cloud.firestore {
       return signedIn() && get(teamPath(teamId)).data.createdBy == request.auth.uid;
     }
 
-    // F1: users may only touch their own profile doc (MVP-SPEC §2.3 fields).
+    // F1: users may only touch their own profile doc (MVP-SPEC §2.3 fields;
+    // v1.2 adds aiMealsEnabled + mealPrefs).
     match /users/{uid} {
-      allow read, update, delete: if request.auth != null && request.auth.uid == uid;
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
       allow create: if request.auth != null
         && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['activeTeamId', 'units', 'theme', 'createdAt']);
+        && request.resource.data.keys().hasOnly(['activeTeamId', 'units', 'theme', 'aiMealsEnabled', 'mealPrefs', 'createdAt']);
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['activeTeamId', 'units', 'theme', 'aiMealsEnabled', 'mealPrefs']);
+
+      // F11 (v1.2): meals are private to their owner — the team only ever
+      // sees function-written aggregates (teams/{id}/fuelling).
+      match /meals/{mealId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['date', 'slot', 'libraryRefId', 'textSnapshot', 'portionNote', 'tag', 'status', 'loggedAt', 'createdAt'])
+          && request.resource.data.date is string
+          && request.resource.data.date.size() == 10
+          && request.resource.data.slot in ['breakfast', 'lunch', 'dinner', 'snack', 'during']
+          && request.resource.data.status in ['logged', 'draft']
+          && request.resource.data.libraryRefId is string
+          && request.resource.data.textSnapshot is string
+          && request.resource.data.textSnapshot.size() >= 1
+          && request.resource.data.textSnapshot.size() <= 200
+          && (!('portionNote' in request.resource.data) || request.resource.data.portionNote.size() <= 120)
+          && (!('tag' in request.resource.data) || request.resource.data.tag in ['carb', 'protein', 'light'])
+          && request.resource.data.loggedAt is timestamp;
+        allow update: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['date', 'slot', 'libraryRefId', 'textSnapshot', 'portionNote', 'tag', 'status', 'loggedAt']);
+      }
+
+      // Library shape is enforced client-side; owner-only is the boundary.
+      match /mealLibrary/{itemId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+
+      // F12: personal templates (session + mealDay).
+      match /templates/{templateId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['kind', 'name', 'payload', 'useCount', 'createdFrom', 'createdAt'])
+          && request.resource.data.kind in ['session', 'mealDay']
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 1
+          && request.resource.data.name.size() <= 60;
+      }
+
+      // F13: function-written AI surfaces — owner reads, clients never write.
+      match /mealPlans/{weekId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
+      match /nutritionReviews/{date} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
     }
 
     // F2 (§2.5 Spark design): membership is guarded here, not by a function.
@@ -41,7 +94,7 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 3
         && request.resource.data.name.size() <= 40
-        && request.resource.data.eventDistanceKm in [18, 30, 48]
+        && request.resource.data.eventDistanceKm in [18, 30, 48, 96]
         && request.resource.data.eventDate is timestamp
         && request.resource.data.inviteCode is string
         && request.resource.data.inviteCode.size() == 6;
@@ -55,7 +108,7 @@ service cloud.firestore {
                .hasOnly(['name', 'eventDistanceKm', 'eventDate', 'inviteCode'])
           && request.resource.data.name.size() >= 3
           && request.resource.data.name.size() <= 40
-          && request.resource.data.eventDistanceKm in [18, 30, 48]
+          && request.resource.data.eventDistanceKm in [18, 30, 48, 96]
           && request.resource.data.inviteCode.size() == 6
         ) || (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds'])
@@ -106,11 +159,23 @@ service cloud.firestore {
         allow delete: if isMember(teamId) && resource.data.uid == request.auth.uid;
       }
 
-      // F5/F9/F10: function-written surfaces — members read, clients never
-      // write (Cloud Functions use the Admin SDK, which bypasses rules).
+      // F5/F9/F10: AI plans are function-written (Admin SDK bypasses rules);
+      // captains may additionally hand-write a 'manual' plan and supersede
+      // the previous active one — nothing else is client-writable.
       match /plans/{planId} {
         allow read: if isMember(teamId);
-        allow write: if false;
+        allow delete: if false;
+        allow create: if isCaptain(teamId)
+          && request.resource.data.keys().hasOnly(['generatedAt', 'model', 'promptVersion', 'phase', 'weekKey', 'status', 'readinessInputs', 'days'])
+          && request.resource.data.model == 'manual'
+          && request.resource.data.status == 'active'
+          && request.resource.data.weekKey is string
+          && request.resource.data.days is list
+          && request.resource.data.days.size() >= 1
+          && request.resource.data.days.size() <= 60;
+        allow update: if isCaptain(teamId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && request.resource.data.status == 'superseded';
 
         // Members tick their own items done (F5 check-offs).
         match /checkoffs/{checkId} {
@@ -146,24 +211,37 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // F3.5: food logs, same ownership model as sessions.
-      match /foodLogs/{logId} {
+      // F12: team templates — readable by members, curated by the captain.
+      match /templates/{templateId} {
+        allow read: if isMember(teamId);
+        allow delete: if isCaptain(teamId);
+        allow create, update: if isCaptain(teamId)
+          && request.resource.data.keys().hasOnly(['kind', 'name', 'payload', 'useCount', 'createdFrom', 'createdAt'])
+          && request.resource.data.kind in ['session', 'mealDay']
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 1
+          && request.resource.data.name.size() <= 60;
+      }
+
+      // F13A: meal plan generation queue (same org-policy-safe pattern as
+      // planRequests). 'team' scope is captain-only.
+      match /mealPlanRequests/{requestId} {
         allow read: if isMember(teamId);
         allow create: if isMember(teamId)
-          && request.resource.data.uid == request.auth.uid
-          && request.resource.data.keys().hasOnly(['uid', 'date', 'mealType', 'description', 'calories', 'notes', 'createdAt'])
-          && request.resource.data.mealType in ['breakfast', 'lunch', 'dinner', 'snack']
-          && request.resource.data.date is string
-          && request.resource.data.date.size() == 10
-          && request.resource.data.description is string
-          && request.resource.data.description.size() >= 1
-          && request.resource.data.description.size() <= 200
-          && (!('calories' in request.resource.data) || (request.resource.data.calories is int && request.resource.data.calories >= 0 && request.resource.data.calories <= 5000))
-          && (!('notes' in request.resource.data) || request.resource.data.notes.size() <= 300);
-        allow update: if isMember(teamId)
-          && resource.data.uid == request.auth.uid
-          && request.resource.data.uid == resource.data.uid;
-        allow delete: if isMember(teamId) && resource.data.uid == request.auth.uid;
+          && request.resource.data.keys().hasOnly(['requestedBy', 'scope', 'status', 'createdAt'])
+          && request.resource.data.requestedBy == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.createdAt == request.time
+          && (request.resource.data.scope == 'self'
+              || (request.resource.data.scope == 'team' && isCaptain(teamId)));
+        allow update, delete: if false;
+      }
+
+      // F13B/F6: function-written fuelling aggregate — counts + latest review
+      // verdict only; raw meals never cross members (spec §3).
+      match /fuelling/{memberUid} {
+        allow read: if isMember(teamId);
+        allow write: if false;
       }
     }
 

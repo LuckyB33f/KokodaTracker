@@ -1,9 +1,14 @@
 import { useState } from 'react'
 import { useFormik } from 'formik'
 import Alert from '@mui/material/Alert'
+import Divider from '@mui/material/Divider'
+import FormControlLabel from '@mui/material/FormControlLabel'
+import FormHelperText from '@mui/material/FormHelperText'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
+import Switch from '@mui/material/Switch'
 import TextField from '@mui/material/TextField'
+import Typography from '@mui/material/Typography'
 import ActionButton from '@/components/common/ActionButton'
 import { useAppDispatch } from '@/app/hooks'
 import { setThemePreference } from '@/features/settings/settingsSlice'
@@ -32,6 +37,11 @@ export default function ProfileForm({
       displayName: initialDisplayName,
       units: profile.units,
       theme: profile.theme,
+      aiMealsEnabled: profile.aiMealsEnabled,
+      mainMeals: profile.mealPrefs.mainMeals,
+      snacks: profile.mealPrefs.snacks,
+      duringTraining: profile.mealPrefs.duringTraining,
+      macroFocus: profile.mealPrefs.macroFocus,
     },
     validationSchema: profileSchema,
     enableReinitialize: true,
@@ -40,7 +50,17 @@ export default function ProfileForm({
       setFormError(null)
       const result = await updateUserProfile({
         uid,
-        patch: { units: values.units, theme: values.theme },
+        patch: {
+          units: values.units,
+          theme: values.theme,
+          aiMealsEnabled: values.aiMealsEnabled,
+          mealPrefs: {
+            mainMeals: values.mainMeals,
+            snacks: values.snacks,
+            duringTraining: values.duringTraining,
+            macroFocus: values.macroFocus,
+          },
+        },
         displayName: values.displayName.trim(),
       })
       if ('error' in result && result.error) {
@@ -96,6 +116,81 @@ export default function ProfileForm({
           <MenuItem value="system">Match device</MenuItem>
           <MenuItem value="light">Light</MenuItem>
           <MenuItem value="dark">Dark</MenuItem>
+        </TextField>
+        <Divider />
+        <Typography variant="subtitle1">Meals</Typography>
+        <div>
+          <FormControlLabel
+            control={
+              <Switch
+                id="aiMealsEnabled"
+                name="aiMealsEnabled"
+                checked={formik.values.aiMealsEnabled}
+                onChange={formik.handleChange}
+              />
+            }
+            label="AI meal suggestions"
+          />
+          <FormHelperText>
+            When off, no AI meal plans or nightly nutrition reviews are
+            generated for you.
+          </FormHelperText>
+        </div>
+        <TextField
+          id="mainMeals"
+          name="mainMeals"
+          label="Main meals per day"
+          select
+          value={formik.values.mainMeals}
+          onChange={formik.handleChange}
+        >
+          {[2, 3, 4].map((n) => (
+            <MenuItem key={n} value={n}>
+              {n}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          id="snacks"
+          name="snacks"
+          label="Snacks per day"
+          select
+          value={formik.values.snacks}
+          onChange={formik.handleChange}
+        >
+          {[0, 1, 2, 3, 4].map((n) => (
+            <MenuItem key={n} value={n}>
+              {n}
+            </MenuItem>
+          ))}
+        </TextField>
+        <div>
+          <FormControlLabel
+            control={
+              <Switch
+                id="duringTraining"
+                name="duringTraining"
+                checked={formik.values.duringTraining}
+                onChange={formik.handleChange}
+              />
+            }
+            label="During-training fuel"
+          />
+          <FormHelperText>
+            Include on-trail / during-session meals in your day and plans.
+          </FormHelperText>
+        </div>
+        <TextField
+          id="macroFocus"
+          name="macroFocus"
+          label="Macro emphasis"
+          select
+          value={formik.values.macroFocus}
+          onChange={formik.handleChange}
+        >
+          <MenuItem value="balanced">Balanced</MenuItem>
+          <MenuItem value="carb">Carb-forward</MenuItem>
+          <MenuItem value="protein">Protein-forward</MenuItem>
         </TextField>
         <ActionButton type="submit" loading={formik.isSubmitting}>
           Save changes

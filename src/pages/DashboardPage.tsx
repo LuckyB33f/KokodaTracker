@@ -14,6 +14,7 @@ import SectionCard from '@/components/common/SectionCard'
 import SEO from '@/components/common/SEO'
 import { useAppSelector } from '@/app/hooks'
 import { selectAuthUser } from '@/features/auth/authSlice'
+import FuellingCard from '@/features/meals/components/FuellingCard'
 import WeekendSuggestionCard from '@/features/plan/components/WeekendSuggestionCard'
 import { useActiveTeam } from '@/features/team/hooks/useActiveTeam'
 import { useGetSessionsQuery } from '@/services/sessionApi'
@@ -147,6 +148,12 @@ export default function DashboardPage() {
       </SectionCard>
 
       <WeekendSuggestionCard teamId={teamId} />
+
+      <FuellingCard
+        teamId={teamId}
+        uid={user?.uid ?? ''}
+        isCaptain={team.createdBy === user?.uid}
+      />
 
       <SectionCard title="This week">
         {memberWeeks.length === 0 ? (

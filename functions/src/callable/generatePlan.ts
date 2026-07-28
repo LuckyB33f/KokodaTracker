@@ -3,7 +3,7 @@ import { Timestamp } from 'firebase-admin/firestore'
 import { z } from 'zod'
 import { db } from '../lib/admin'
 import { geminiJson } from '../lib/gemini'
-import { weekKeyFor, todayBrisbane } from '../lib/weekKey'
+import { brisbaneWeekDates, weekKeyFor, todayBrisbane } from '../lib/weekKey'
 import { loadCeiling, type Verdict } from '../logic/verdict'
 
 export const PROMPT_VERSION = 1
@@ -47,6 +47,7 @@ function buildPrompt(args: {
   distanceKm: number
   phase: string
   weekKey: string
+  weekDates: string[]
   members: MemberAggregates[]
 }): string {
   return `You are a trail-endurance coach writing ONE week of training for a small team preparing for the Kokoda Challenge (${args.distanceKm} km trail event on ${args.eventDate}). Current phase: ${args.phase}. Week: ${args.weekKey}.
@@ -61,12 +62,43 @@ ${args.members
 
 Rules (non-negotiable):
 - Return JSON ONLY matching: {"days":[{"date":"YYYY-MM-DD","memberUid":"<uid or null>","title":"...","detail":"...","targetType":"duration|distance|rest","targetValue":<number>}]}
-- 7 consecutive days starting Monday of week ${args.weekKey}.
-- Saturday is the mandatory whole-team hike: one entry with memberUid null.
+- Use ONLY these dates (Monday to Sunday of week ${args.weekKey}): ${args.weekDates.join(', ')}.
+- Use ONLY the member uids listed above (or null for the whole team).
+- Saturday ${args.weekDates[5]} is the mandatory whole-team hike: one entry with memberUid null.
 - Per member: include at least 2 rest days (targetType "rest", targetValue 0).
 - Respect each member's ceiling; scale_back members get a recovery week.
 - duration targetValue is minutes; distance targetValue is km.
 - General fitness guidance only — no medical advice; keep detail practical (terrain, pacing, water).`
+}
+
+// Semantic checks Zod can't express — wrong dates, unknown uids, a missing
+// Saturday team hike or missing rest days all go back to Gemini for repair.
+export function planIssues(
+  days: z.infer<typeof planSchema>['days'],
+  memberIds: string[],
+  weekDates: string[],
+): string[] {
+  const issues: string[] = []
+  const dateSet = new Set(weekDates)
+  const uidSet = new Set(memberIds)
+  for (const day of days) {
+    if (!dateSet.has(day.date))
+      issues.push(`date ${day.date} is not in week ${weekDates[0]}..${weekDates[6]}`)
+    if (day.memberUid !== null && !uidSet.has(day.memberUid))
+      issues.push(`unknown memberUid "${day.memberUid}"`)
+    if (day.targetType === 'rest' && day.targetValue !== 0)
+      issues.push(`rest day ${day.date} must have targetValue 0`)
+  }
+  if (!days.some((d) => d.date === weekDates[5] && d.memberUid === null)) {
+    issues.push(`missing the whole-team Saturday hike (memberUid null on ${weekDates[5]})`)
+  }
+  for (const uid of memberIds) {
+    const rest = days.filter(
+      (d) => d.memberUid === uid && d.targetType === 'rest',
+    ).length
+    if (rest < 2) issues.push(`member ${uid} has ${rest} rest day(s); needs at least 2`)
+  }
+  return [...new Set(issues)].slice(0, 10)
 }
 
 export interface GeneratePlanDeps {
@@ -178,30 +210,44 @@ export async function generatePlanHandler({
     })
   }
 
+  const weekDates = brisbaneWeekDates(now)
   const prompt = buildPrompt({
     eventDate: team.eventDate.toDate().toISOString().slice(0, 10),
     distanceKm: team.eventDistanceKm,
     phase,
     weekKey,
+    weekDates,
     members,
   })
 
-  // Gemini → Zod → one retry-with-repair (spec §2.4).
-  let parsed: z.infer<typeof planSchema>
-  try {
-    parsed = planSchema.parse(await geminiJson(geminiApiKey, prompt))
-  } catch (firstError) {
-    const repairPrompt = `${prompt}\n\nYour previous answer was invalid (${String(
-      firstError,
-    ).slice(0, 200)}). Return ONLY corrected JSON matching the schema.`
+  // Gemini → Zod + semantic checks → one retry-with-repair (spec §2.4).
+  let parsed: z.infer<typeof planSchema> | null = null
+  let attemptPrompt = prompt
+  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+    let problems: string
     try {
-      parsed = planSchema.parse(await geminiJson(geminiApiKey, repairPrompt))
-    } catch {
-      throw new HttpsError(
-        'internal',
-        'The AI returned an invalid plan twice — try again in a minute.',
+      const candidate = planSchema.parse(
+        await geminiJson(geminiApiKey, attemptPrompt),
       )
+      const issues = planIssues(candidate.days, team.memberIds, weekDates)
+      if (issues.length === 0) {
+        parsed = candidate
+        break
+      }
+      problems = issues.join('; ')
+    } catch (error) {
+      problems = String(error).slice(0, 200)
     }
+    attemptPrompt = `${prompt}\n\nYour previous answer was invalid (${problems.slice(
+      0,
+      600,
+    )}). Return ONLY corrected JSON matching the schema and every rule above.`
+  }
+  if (!parsed) {
+    throw new HttpsError(
+      'internal',
+      'The AI returned an invalid plan twice — try again in a minute.',
+    )
   }
 
   // Enforce ceilings in code: clamp duration-type load (minutes × assumed

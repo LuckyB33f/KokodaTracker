@@ -1,0 +1,192 @@
+import { z } from 'zod'
+
+export const MEAL_PLAN_PROMPT_VERSION = 1
+
+export const MEAL_SLOTS = [
+  'breakfast',
+  'lunch',
+  'dinner',
+  'snack',
+  'during',
+] as const
+const MAIN_SLOTS = ['breakfast', 'lunch', 'dinner']
+
+export const mealPlanSchema = z.object({
+  days: z
+    .array(
+      z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        meals: z
+          .array(
+            z.object({
+              slot: z.enum(MEAL_SLOTS),
+              libraryRefId: z.string().nullable(),
+              text: z.string().min(1).max(200),
+              tag: z.enum(['carb', 'protein', 'light']).nullable(),
+            }),
+          )
+          .min(1)
+          .max(10),
+      }),
+    )
+    .length(7),
+})
+
+export type MealPlanDays = z.infer<typeof mealPlanSchema>['days']
+
+export interface MealPrefs {
+  mainMeals: number
+  snacks: number
+  duringTraining: boolean
+  macroFocus: 'carb' | 'protein' | 'balanced'
+}
+
+export const DEFAULT_MEAL_PREFS: MealPrefs = {
+  mainMeals: 3,
+  snacks: 2,
+  duringTraining: true,
+  macroFocus: 'balanced',
+}
+
+export interface LibraryEntry {
+  id: string
+  text: string
+  tag: string | null
+  favourite: boolean
+}
+
+export interface TrainingDay {
+  date: string
+  title: string
+  targetType: string
+  targetValue: number
+}
+
+const MACRO_LINE: Record<MealPrefs['macroFocus'], string> = {
+  carb: 'Lean carb-forward across the week',
+  protein: 'Lean protein-forward across the week',
+  balanced: 'Keep the week balanced across carbs and protein',
+}
+
+export function buildMealPlanPrompt(args: {
+  displayName: string
+  eventDate: string
+  distanceKm: number
+  phase: string
+  weekKey: string
+  weekDates: string[]
+  prefs: MealPrefs
+  library: LibraryEntry[]
+  trainingDays: TrainingDay[]
+}): string {
+  const trainingLines =
+    args.trainingDays.length > 0
+      ? args.trainingDays
+          .map(
+            (d) =>
+              `- ${d.date}: ${d.title} (${d.targetType} ${d.targetValue}${d.targetType === 'distance' ? 'km' : d.targetType === 'duration' ? 'min' : ''})`,
+          )
+          .join('\n')
+      : '- No planned sessions this week.'
+  const libraryLines =
+    args.library.length > 0
+      ? args.library
+          .map(
+            (item) =>
+              `- id "${item.id}" | ${item.text}${item.tag ? ` | ${item.tag}` : ''}${item.favourite ? ' | favourite' : ''}`,
+          )
+          .join('\n')
+      : '- (empty — use plain descriptions with libraryRefId null)'
+  const duringRule = args.prefs.duringTraining
+    ? `Include "during" slot fuel ONLY on the training days listed above (30-60g carbs/hr style on long hikes).`
+    : `NEVER use the "during" slot — this member doesn't log during-training fuel.`
+
+  return `You are a practical endurance-training fuelling assistant writing ONE week of meals for ${args.displayName}, who is training for the Kokoda Challenge (${args.distanceKm} km trail event on ${args.eventDate}). Training phase: ${args.phase}. Week: ${args.weekKey}.
+
+Their planned training this week:
+${trainingLines}
+
+Their meal library (foods they actually eat — strongly prefer these):
+${libraryLines}
+
+Structure rules (non-negotiable):
+- Return JSON ONLY matching: {"days":[{"date":"YYYY-MM-DD","meals":[{"slot":"breakfast|lunch|dinner|snack|during","libraryRefId":"<id or null>","text":"...","tag":"carb|protein|light" or null}]} x7]}
+- Use ONLY these dates, one entry each, in order: ${args.weekDates.join(', ')}.
+- Each day MUST have exactly ${args.prefs.mainMeals} main meals (slots breakfast/lunch/dinner) and at most ${args.prefs.snacks} snacks.
+- ${duringRule}
+- When a meal is from the library, set libraryRefId to its id and copy its text; otherwise libraryRefId null. Use library items for at least half the meals when the library has 10 or more items.
+- ${MACRO_LINE[args.prefs.macroFocus]}, and always carb-centred around the key sessions listed.
+
+Nutrition principles (apply, don't recite):
+- Carb-centred meals around key sessions; roughly 20-30g protein after training.
+- Gut training on long hikes (30-60g carbs/hr) from Feb 2027 onwards.
+- Race-week guidance only if the phase is taper.
+
+Tone constraints (non-negotiable):
+- NO calorie counts or targets. NO weight-loss, restriction, or body-composition framing. No medical or dietetic advice. Practical training fuel only — keep each text short and concrete.`
+}
+
+// Semantic checks Zod can't express; failures go back to Gemini for repair.
+export function mealPlanIssues(
+  days: MealPlanDays,
+  args: {
+    weekDates: string[]
+    prefs: MealPrefs
+    libraryIds: Set<string>
+    trainingDates: Set<string>
+  },
+): string[] {
+  const issues: string[] = []
+  const seenDates = days.map((d) => d.date)
+  for (const date of args.weekDates) {
+    if (!seenDates.includes(date)) issues.push(`missing date ${date}`)
+  }
+  for (const day of days) {
+    if (!args.weekDates.includes(day.date)) {
+      issues.push(`date ${day.date} is not in this week`)
+      continue
+    }
+    const mains = day.meals.filter((m) => MAIN_SLOTS.includes(m.slot)).length
+    if (mains !== args.prefs.mainMeals) {
+      issues.push(
+        `${day.date} has ${mains} main meals; needs exactly ${args.prefs.mainMeals}`,
+      )
+    }
+    const snacks = day.meals.filter((m) => m.slot === 'snack').length
+    if (snacks > args.prefs.snacks) {
+      issues.push(
+        `${day.date} has ${snacks} snacks; at most ${args.prefs.snacks} allowed`,
+      )
+    }
+    for (const meal of day.meals) {
+      if (meal.slot === 'during') {
+        if (!args.prefs.duringTraining) {
+          issues.push(`"during" slot used on ${day.date} but member has it off`)
+        } else if (!args.trainingDates.has(day.date)) {
+          issues.push(`"during" slot on ${day.date}, which has no training`)
+        }
+      }
+      if (meal.libraryRefId !== null && !args.libraryIds.has(meal.libraryRefId)) {
+        issues.push(`unknown libraryRefId "${meal.libraryRefId}"`)
+      }
+    }
+  }
+  if (args.libraryIds.size >= 10) {
+    const all = days.flatMap((d) => d.meals)
+    const fromLibrary = all.filter((m) => m.libraryRefId !== null).length
+    if (fromLibrary / all.length < 0.5) {
+      issues.push(
+        `only ${fromLibrary}/${all.length} meals use the library; at least half must (library has ${args.libraryIds.size} items)`,
+      )
+    }
+  }
+  return [...new Set(issues)].slice(0, 12)
+}
+
+export function libraryCoveragePct(days: MealPlanDays): number {
+  const all = days.flatMap((d) => d.meals)
+  if (all.length === 0) return 0
+  return Math.round(
+    (all.filter((m) => m.libraryRefId !== null).length / all.length) * 100,
+  )
+}

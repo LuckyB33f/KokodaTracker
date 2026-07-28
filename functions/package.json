@@ -7,7 +7,7 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test \"lib/logic/*.test.js\""
+    "test": "npm run build && node --test \"lib/logic/*.test.js\" \"lib/callable/*.test.js\""
   },
   "dependencies": {
     "firebase-admin": "^12.7.0",

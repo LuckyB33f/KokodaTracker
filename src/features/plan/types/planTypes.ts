@@ -16,16 +16,28 @@ export interface ReadinessInput {
   ceiling: number
 }
 
-// Mirrors teams/{teamId}/plans/{planId} (MVP-SPEC §2.3, function-written).
+// Mirrors teams/{teamId}/plans/{planId} (MVP-SPEC §2.3). Function-written for
+// AI plans; captain-written (model 'manual') for manual plans.
 export interface Plan {
   id: string
   weekKey: string
   phase: string
+  model: string
   status: 'active' | 'superseded'
   generatedAtMs: number | null
   promptVersion: number
   readinessInputs: Record<string, ReadinessInput>
   days: PlanDay[]
+}
+
+// Mirrors teams/{teamId}/planRequests/{requestId} — the fire-and-forget
+// generation queue processed by the onPlanRequest trigger.
+export interface PlanRequest {
+  id: string
+  status: 'pending' | 'processing' | 'done' | 'error'
+  planId: string | null
+  errorMessage: string | null
+  createdAtMs: number | null
 }
 
 export interface Checkoff {

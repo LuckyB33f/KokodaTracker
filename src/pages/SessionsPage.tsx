@@ -9,6 +9,7 @@ import useMediaQuery from '@mui/material/useMediaQuery'
 import { useTheme } from '@mui/material/styles'
 import Stack from '@mui/material/Stack'
 import AddIcon from '@mui/icons-material/Add'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CloseIcon from '@mui/icons-material/Close'
 import GpsFixedIcon from '@mui/icons-material/GpsFixed'
 import GroupIcon from '@mui/icons-material/Group'
@@ -20,17 +21,45 @@ import SectionCard from '@/components/common/SectionCard'
 import SEO from '@/components/common/SEO'
 import SessionForm from '@/features/sessions/components/SessionForm'
 import SessionsList from '@/features/sessions/components/SessionsList'
+import TemplatePicker from '@/features/templates/components/TemplatePicker'
+import { seedSessionTemplates } from '@/features/templates/utils/seedTemplates'
 import { useActiveTeam } from '@/features/team/hooks/useActiveTeam'
 import { useGetSessionsQuery } from '@/services/sessionApi'
-import type { Session } from '@/features/sessions/types/sessionTypes'
+import {
+  useAddTemplateMutation,
+  useBumpTemplateUseMutation,
+  useGetPersonalTemplatesQuery,
+  useGetTeamTemplatesQuery,
+} from '@/services/templateApi'
+import { phaseFor } from '@/utils/trainingPhase'
+import { isSessionTemplate } from '@/features/templates/types/templateTypes'
+import type { Template } from '@/features/templates/types/templateTypes'
+import type {
+  Session,
+  SessionFormValues,
+} from '@/features/sessions/types/sessionTypes'
+
+type LogStep =
+  | { kind: 'closed' }
+  | { kind: 'pick' }
+  | { kind: 'form'; prefill?: Partial<SessionFormValues> }
+  | { kind: 'edit'; session: Session }
 
 export default function SessionsPage() {
-  const { uid, teamId, isLoading } = useActiveTeam()
+  const { uid, teamId, team, isCaptain, isLoading } = useActiveTeam()
   const { data: sessions = [] } = useGetSessionsQuery(teamId ?? '', {
     skip: !teamId,
   })
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editing, setEditing] = useState<Session | undefined>(undefined)
+  const { data: personalTemplates = [] } = useGetPersonalTemplatesQuery(
+    uid ?? '',
+    { skip: !uid },
+  )
+  const { data: teamTemplates = [] } = useGetTeamTemplatesQuery(teamId ?? '', {
+    skip: !teamId,
+  })
+  const [bumpTemplateUse] = useBumpTemplateUseMutation()
+  const [addTemplate, { isLoading: seeding }] = useAddTemplateMutation()
+  const [step, setStep] = useState<LogStep>({ kind: 'closed' })
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
 
@@ -61,6 +90,51 @@ export default function SessionsPage() {
     )
   }
 
+  const close = () => setStep({ kind: 'closed' })
+
+  const pickTemplate = (template: Template) => {
+    if (!isSessionTemplate(template)) return
+    void bumpTemplateUse({
+      scope: template.scope,
+      ownerId: template.scope === 'team' ? teamId : (uid ?? ''),
+      templateId: template.id,
+    })
+    const p = template.payload
+    setStep({
+      kind: 'form',
+      prefill: {
+        type: p.type,
+        durationMin: String(p.durationMin),
+        distanceKm: p.distanceKm !== undefined ? String(p.distanceKm) : '',
+        elevationGainM:
+          p.elevationGainM !== undefined ? String(p.elevationGainM) : '',
+        perceivedEffort: p.perceivedEffort,
+        notes: p.notes ?? '',
+      },
+    })
+  }
+
+  // R12.1 seed set: captain-only, offered while the team library is empty.
+  const offerSeeds =
+    isCaptain &&
+    team !== null &&
+    !teamTemplates.some((template) => template.kind === 'session')
+
+  const addSeeds = async () => {
+    if (!team) return
+    const seeds = seedSessionTemplates(phaseFor(Date.now(), team.eventDateMs))
+    for (const seed of seeds) {
+      await addTemplate({
+        scope: 'team',
+        ownerId: teamId,
+        kind: 'session',
+        name: seed.name,
+        payload: seed.payload,
+        createdFrom: 'seed',
+      })
+    }
+  }
+
   return (
     <PageContainer>
       <SEO title="Training log" noindex />
@@ -80,10 +154,7 @@ export default function SessionsPage() {
             <Button
               variant="contained"
               startIcon={<AddIcon />}
-              onClick={() => {
-                setEditing(undefined)
-                setDialogOpen(true)
-              }}
+              onClick={() => setStep({ kind: 'pick' })}
             >
               Log
             </Button>
@@ -94,36 +165,69 @@ export default function SessionsPage() {
         <SessionsList
           teamId={teamId}
           uid={uid ?? ''}
+          isCaptain={isCaptain}
           sessions={sessions}
-          onEdit={(session) => {
-            setEditing(session)
-            setDialogOpen(true)
-          }}
+          onEdit={(session) => setStep({ kind: 'edit', session })}
         />
       </SectionCard>
       <Dialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        open={step.kind !== 'closed'}
+        onClose={close}
         fullScreen={fullScreen}
         fullWidth
         maxWidth="sm"
       >
         <DialogTitle sx={{ pr: 7 }}>
-          {editing ? 'Edit session' : 'Log a session'}
+          {step.kind === 'edit'
+            ? 'Edit session'
+            : step.kind === 'form'
+              ? 'Log a session'
+              : 'Start from…'}
           <IconButton
             aria-label="Close"
-            onClick={() => setDialogOpen(false)}
+            onClick={close}
             sx={{ position: 'absolute', right: 8, top: 8, width: 44, height: 44 }}
           >
             <CloseIcon />
           </IconButton>
         </DialogTitle>
         <DialogContent>
-          <SessionForm
-            teamId={teamId}
-            session={editing}
-            onSaved={() => setDialogOpen(false)}
-          />
+          {step.kind === 'pick' && (
+            <>
+              <TemplatePicker
+                kind="session"
+                personal={personalTemplates}
+                team={teamTemplates}
+                onPick={pickTemplate}
+                onBlank={() => setStep({ kind: 'form' })}
+                blankLabel="Blank session"
+              />
+              {offerSeeds && (
+                <Button
+                  startIcon={<AutoAwesomeIcon />}
+                  disabled={seeding}
+                  onClick={() => void addSeeds()}
+                  sx={{ mt: 2 }}
+                >
+                  Add starter templates for this phase
+                </Button>
+              )}
+            </>
+          )}
+          {step.kind === 'form' && (
+            <SessionForm
+              teamId={teamId}
+              prefill={step.prefill}
+              onSaved={close}
+            />
+          )}
+          {step.kind === 'edit' && (
+            <SessionForm
+              teamId={teamId}
+              session={step.session}
+              onSaved={close}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </PageContainer>

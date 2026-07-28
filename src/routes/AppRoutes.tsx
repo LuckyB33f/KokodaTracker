@@ -14,6 +14,8 @@ const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
 const TeamPage = lazy(() => import('@/pages/TeamPage'))
 const SessionsPage = lazy(() => import('@/pages/SessionsPage'))
 const FoodPage = lazy(() => import('@/pages/FoodPage'))
+const MealLibraryPage = lazy(() => import('@/pages/MealLibraryPage'))
+const MealPlanPage = lazy(() => import('@/pages/MealPlanPage'))
 const RecordPage = lazy(() => import('@/pages/RecordPage'))
 const PlanPage = lazy(() => import('@/pages/PlanPage'))
 const ProfilePage = lazy(() => import('@/pages/ProfilePage'))
@@ -43,6 +45,8 @@ const router = createBrowserRouter([
       { path: '/team', element: <TeamPage /> },
       { path: '/sessions', element: <SessionsPage /> },
       { path: '/food', element: <FoodPage /> },
+      { path: '/food/library', element: <MealLibraryPage /> },
+      { path: '/food/plan', element: <MealPlanPage /> },
       { path: '/record', element: <RecordPage /> },
       { path: '/plan', element: <PlanPage /> },
       { path: '/profile', element: <ProfilePage /> },

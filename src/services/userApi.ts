@@ -8,12 +8,21 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
-import type { UserProfile } from '@/features/profile/types/profileTypes'
+import {
+  DEFAULT_MEAL_PREFS,
+  type MealPrefs,
+  type UserProfile,
+} from '@/features/profile/types/profileTypes'
 import { baseApi, type ApiError } from './baseApi'
 
 interface UpdateUserProfileArgs {
   uid: string
-  patch: Partial<Pick<UserProfile, 'activeTeamId' | 'units' | 'theme'>>
+  patch: Partial<
+    Pick<
+      UserProfile,
+      'activeTeamId' | 'units' | 'theme' | 'aiMealsEnabled' | 'mealPrefs'
+    >
+  >
   displayName?: string
 }
 
@@ -29,10 +38,14 @@ function toApiError(error: unknown): { error: ApiError } {
 
 function snapshotToProfile(data: Record<string, unknown>): UserProfile {
   const createdAt = data.createdAt
+  const rawPrefs = (data.mealPrefs as Partial<MealPrefs> | undefined) ?? {}
   return {
     activeTeamId: (data.activeTeamId as string | null) ?? null,
     units: (data.units as UserProfile['units']) ?? 'metric',
     theme: (data.theme as UserProfile['theme']) ?? 'system',
+    // Pre-v1.2 docs lack these fields — default AI on, standard breakdown.
+    aiMealsEnabled: (data.aiMealsEnabled as boolean | undefined) ?? true,
+    mealPrefs: { ...DEFAULT_MEAL_PREFS, ...rawPrefs },
     createdAtMs:
       createdAt instanceof Timestamp ? createdAt.toMillis() : null,
   }
@@ -66,6 +79,8 @@ export const userApi = baseApi.injectEndpoints({
               activeTeamId: null,
               units: 'metric',
               theme: 'system',
+              aiMealsEnabled: true,
+              mealPrefs: DEFAULT_MEAL_PREFS,
               createdAt: serverTimestamp(),
             })
           }

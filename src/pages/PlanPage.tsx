@@ -10,6 +10,7 @@ import ListItem from '@mui/material/ListItem'
 import ListItemText from '@mui/material/ListItemText'
 import Typography from '@mui/material/Typography'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import EditCalendarIcon from '@mui/icons-material/EditCalendar'
 import EventNoteIcon from '@mui/icons-material/EventNote'
 import GroupIcon from '@mui/icons-material/Group'
 import ActionButton from '@/components/common/ActionButton'
@@ -22,10 +23,12 @@ import SEO from '@/components/common/SEO'
 import { useAppSelector } from '@/app/hooks'
 import { selectAuthUser } from '@/features/auth/authSlice'
 import { useActiveTeam } from '@/features/team/hooks/useActiveTeam'
+import ManualPlanDialog from '@/features/plan/components/ManualPlanDialog'
 import {
   useGeneratePlanMutation,
   useGetActivePlanQuery,
   useGetCheckoffsQuery,
+  useGetLatestPlanRequestQuery,
   useSetCheckoffMutation,
 } from '@/services/planApi'
 import { useGetTeamMembersQuery } from '@/services/teamApi'
@@ -58,9 +61,32 @@ export default function PlanPage() {
   const { data: members = [] } = useGetTeamMembersQuery(teamId ?? '', {
     skip: !teamId,
   })
-  const [generatePlan, { isLoading: generating }] = useGeneratePlanMutation()
+  const { data: latestRequest } = useGetLatestPlanRequestQuery(teamId ?? '', {
+    skip: !teamId,
+  })
+  const [generatePlan, { isLoading: firing }] = useGeneratePlanMutation()
   const [setCheckoff] = useSetCheckoffMutation()
   const [generateError, setGenerateError] = useState<string | null>(null)
+  const [manualOpen, setManualOpen] = useState(false)
+  const [dismissedRequestId, setDismissedRequestId] = useState<string | null>(
+    null,
+  )
+
+  // A request counts as in-flight only while fresh — if the trigger dies
+  // without reporting, the button unlocks after 15 minutes.
+  const requestAgeMs = latestRequest?.createdAtMs
+    ? Date.now() - latestRequest.createdAtMs
+    : 0
+  const generating =
+    firing ||
+    ((latestRequest?.status === 'pending' ||
+      latestRequest?.status === 'processing') &&
+      requestAgeMs < 15 * 60 * 1000)
+  const requestError =
+    latestRequest?.status === 'error' &&
+    latestRequest.id !== dismissedRequestId
+      ? (latestRequest.errorMessage ?? 'Plan generation failed. Try again.')
+      : null
 
   if (isLoading) {
     return (
@@ -103,13 +129,15 @@ export default function PlanPage() {
     ? [...new Set(plan.days.map((day) => day.date))].sort()
     : []
 
+  // Fire-and-forget: the request doc is queued; the streams take it from here.
   const generate = async () => {
     setGenerateError(null)
+    setDismissedRequestId(null)
     const result = await generatePlan({ teamId })
     if ('error' in result && result.error) {
       setGenerateError(
         (result.error as { message?: string }).message ??
-          'Couldn’t generate the plan.',
+          'Couldn’t request the plan.',
       )
     }
   }
@@ -121,26 +149,54 @@ export default function PlanPage() {
         title="Training plan"
         subtitle={
           plan
-            ? `Week ${plan.weekKey.split('-W')[1]} · ${plan.phase} phase`
-            : 'AI-generated weekly plan for your team.'
+            ? `Week ${plan.weekKey.split('-W')[1]} · ${
+                plan.model === 'manual' ? 'manual plan' : `${plan.phase} phase`
+              }`
+            : 'Weekly plan for your team — AI-generated or hand-built.'
         }
         action={
           isCaptain ? (
-            <ActionButton
-              startIcon={<AutoAwesomeIcon />}
-              loading={generating}
-              onClick={() => void generate()}
-              fullWidth={false}
-            >
-              {plan ? 'Regenerate' : 'Generate'}
-            </ActionButton>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                variant="outlined"
+                startIcon={<EditCalendarIcon />}
+                onClick={() => setManualOpen(true)}
+              >
+                Manual plan
+              </Button>
+              <ActionButton
+                startIcon={<AutoAwesomeIcon />}
+                loading={generating}
+                onClick={() => void generate()}
+                fullWidth={false}
+              >
+                {generating ? 'Generating…' : plan ? 'Regenerate' : 'Generate'}
+              </ActionButton>
+            </Box>
           ) : undefined
         }
       />
 
+      {generating && !firing && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Your plan is generating — it usually takes a minute or two. You can
+          leave this page and come back; it’ll appear here when it’s ready.
+        </Alert>
+      )}
+
       {generateError && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {generateError}
+        </Alert>
+      )}
+
+      {requestError && !generating && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          onClose={() => setDismissedRequestId(latestRequest?.id ?? null)}
+        >
+          {requestError}
         </Alert>
       )}
 
@@ -159,8 +215,8 @@ export default function PlanPage() {
           title="No plan yet"
           description={
             isCaptain
-              ? 'Generate this week’s plan — it uses everyone’s recent training.'
-              : 'Ask your captain to generate this week’s plan.'
+              ? 'Generate this week’s plan from everyone’s recent training, or build one manually.'
+              : 'Ask your captain to set up this week’s plan.'
           }
         />
       ) : (
@@ -234,6 +290,15 @@ export default function PlanPage() {
         Plans are general fitness guidance, not medical advice. Listen to your
         body and see a professional for injuries.
       </Typography>
+
+      {isCaptain && (
+        <ManualPlanDialog
+          open={manualOpen}
+          onClose={() => setManualOpen(false)}
+          teamId={teamId}
+          members={members}
+        />
+      )}
     </PageContainer>
   )
 }

@@ -17,7 +17,7 @@ export default function CreateTeamForm() {
   const formik = useFormik<CreateTeamFormValues>({
     initialValues: {
       name: '',
-      eventDistanceKm: 48,
+      eventDistanceKm: 96,
       eventDate: '2027-06-19',
     },
     validationSchema: createTeamSchema,

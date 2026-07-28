@@ -2,17 +2,22 @@ import {
   Timestamp,
   collection,
   doc,
+  getDocs,
   limit,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
 import type {
   Checkoff,
   Plan,
+  PlanDay,
+  PlanRequest,
   WeekendSuggestion,
 } from '@/features/plan/types/planTypes'
 import { baseApi, type ApiError } from './baseApi'
@@ -33,6 +38,7 @@ function toPlan(id: string, data: Record<string, unknown>): Plan {
     id,
     weekKey: data.weekKey as string,
     phase: data.phase as string,
+    model: (data.model as string) ?? 'gemini',
     status: data.status as Plan['status'],
     generatedAtMs:
       generatedAt instanceof Timestamp ? generatedAt.toMillis() : null,
@@ -133,10 +139,10 @@ export const planApi = baseApi.injectEndpoints({
       },
     }),
 
-    // §2.5 org-policy-safe flow: write a rules-guarded planRequests doc, then
-    // stream it until the onPlanRequest trigger reports done/error. (Callables
-    // need an allUsers invoker grant the org policy forbids.)
-    generatePlan: builder.mutation<{ planId: string }, { teamId: string }>({
+    // §2.5 org-policy-safe flow: write a rules-guarded planRequests doc and
+    // return immediately — fire-and-forget. The getLatestPlanRequest stream
+    // reports progress, and the active-plan stream picks up the result.
+    generatePlan: builder.mutation<{ requestId: string }, { teamId: string }>({
       queryFn: async ({ teamId }) => {
         try {
           const user = auth.currentUser
@@ -151,45 +157,90 @@ export const planApi = baseApi.injectEndpoints({
             status: 'pending',
             createdAt: serverTimestamp(),
           })
-          const planId = await new Promise<string>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              unsubscribe()
-              reject(
-                Object.assign(
-                  new Error('Plan generation timed out — try again.'),
-                  { code: 'deadline-exceeded' },
-                ),
-              )
-            }, 120_000)
-            const settle = (fn: () => void) => {
-              clearTimeout(timeout)
-              unsubscribe()
-              fn()
+          return { data: { requestId: requestRef.id } }
+        } catch (error) {
+          return toApiError(error)
+        }
+      },
+    }),
+
+    // Live view of the newest generation request so the page can show
+    // "generating — come back in a few minutes" / surface trigger errors.
+    getLatestPlanRequest: builder.query<PlanRequest | null, string>({
+      queryFn: async () => ({ data: null }),
+      async onCacheEntryAdded(
+        teamId,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        try {
+          await cacheDataLoaded
+        } catch {
+          return
+        }
+        const latestQuery = query(
+          collection(db, 'teams', teamId, 'planRequests'),
+          orderBy('createdAt', 'desc'),
+          limit(1),
+        )
+        const unsubscribe = onSnapshot(latestQuery, (snap) => {
+          const docSnap = snap.docs[0]
+          updateCachedData(() => {
+            if (!docSnap) return null
+            const data = docSnap.data()
+            const createdAt = data.createdAt
+            return {
+              id: docSnap.id,
+              status: data.status as PlanRequest['status'],
+              planId: (data.planId as string | undefined) ?? null,
+              errorMessage: (data.errorMessage as string | undefined) ?? null,
+              createdAtMs:
+                createdAt instanceof Timestamp ? createdAt.toMillis() : null,
             }
-            const unsubscribe = onSnapshot(
-              requestRef,
-              (snap) => {
-                const data = snap.data()
-                if (data?.status === 'done') {
-                  settle(() => resolve(data.planId as string))
-                } else if (data?.status === 'error') {
-                  settle(() =>
-                    reject(
-                      Object.assign(
-                        new Error(
-                          (data.errorMessage as string) ??
-                            'Plan generation failed. Try again.',
-                        ),
-                        { code: (data.errorCode as string) ?? 'internal' },
-                      ),
-                    ),
-                  )
-                }
-              },
-              (error) => settle(() => reject(error)),
-            )
           })
-          return { data: { planId } }
+        })
+        await cacheEntryRemoved
+        unsubscribe()
+      },
+      providesTags: ['PlanRequest'],
+    }),
+
+    // Captain writes a hand-built plan: supersede the active plan and create
+    // the manual one in a single batch (rules restrict shape + captain-only).
+    saveManualPlan: builder.mutation<
+      { planId: string },
+      { teamId: string; weekKey: string; days: PlanDay[] }
+    >({
+      queryFn: async ({ teamId, weekKey, days }) => {
+        try {
+          const user = auth.currentUser
+          if (!user) {
+            throw Object.assign(new Error('Sign in first.'), {
+              code: 'unauthenticated',
+            })
+          }
+          const batch = writeBatch(db)
+          const activeSnap = await getDocs(
+            query(
+              collection(db, 'teams', teamId, 'plans'),
+              where('status', '==', 'active'),
+            ),
+          )
+          for (const docSnap of activeSnap.docs) {
+            batch.update(docSnap.ref, { status: 'superseded' })
+          }
+          const planRef = doc(collection(db, 'teams', teamId, 'plans'))
+          batch.set(planRef, {
+            generatedAt: serverTimestamp(),
+            model: 'manual',
+            promptVersion: 0,
+            phase: 'manual',
+            weekKey,
+            status: 'active',
+            readinessInputs: {},
+            days,
+          })
+          await batch.commit()
+          return { data: { planId: planRef.id } }
         } catch (error) {
           return toApiError(error)
         }
@@ -247,5 +298,7 @@ export const {
   useGetCheckoffsQuery,
   useSetCheckoffMutation,
   useGeneratePlanMutation,
+  useGetLatestPlanRequestQuery,
+  useSaveManualPlanMutation,
   useGetWeekendSuggestionQuery,
 } = planApi

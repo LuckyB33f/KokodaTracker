@@ -25,6 +25,8 @@ import { sessionSchema } from '../validation/sessionValidationSchemas'
 interface SessionFormProps {
   teamId: string
   session?: Session // present = edit mode
+  // From a template (R12.1): merged into the blank form's initial values.
+  prefill?: Partial<SessionFormValues>
   onSaved: () => void
 }
 
@@ -54,6 +56,7 @@ function toInput(values: SessionFormValues): SessionInput {
 export default function SessionForm({
   teamId,
   session,
+  prefill,
   onSaved,
 }: SessionFormProps) {
   const [addSession] = useAddSessionMutation()
@@ -80,6 +83,7 @@ export default function SessionForm({
           elevationGainM: '',
           perceivedEffort: 5,
           notes: '',
+          ...prefill,
         },
     validationSchema: sessionSchema,
     onSubmit: async (values) => {

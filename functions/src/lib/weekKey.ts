@@ -21,6 +21,21 @@ export function weekKeyFor(date: Date): string {
   return `${isoYear}-W${String(week).padStart(2, '0')}`
 }
 
+// Mon..Sun yyyy-mm-dd strings for the Brisbane week containing `date`.
+export function brisbaneWeekDates(date: Date): string[] {
+  const [year, month, day] = brisbaneYmd
+    .format(date)
+    .split('-')
+    .map((part) => Number(part))
+  const monday = new Date(Date.UTC(year, month - 1, day))
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() || 7) - 1))
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday)
+    d.setUTCDate(monday.getUTCDate() + i)
+    return d.toISOString().slice(0, 10)
+  })
+}
+
 export function shiftWeeks(date: Date, weeks: number): Date {
   return new Date(date.getTime() + weeks * 7 * 24 * 60 * 60 * 1000)
 }

@@ -15,10 +15,12 @@ import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import StairsIcon from '@mui/icons-material/Stairs'
 import EmptyState from '@/components/common/EmptyState'
+import SaveTemplateDialog from '@/features/templates/components/SaveTemplateDialog'
 import { useGetTeamMembersQuery } from '@/services/teamApi'
 import { useDeleteSessionMutation } from '@/services/sessionApi'
 import { SESSION_TYPE_LABELS } from '../types/sessionTypes'
 import type { Session, SessionType } from '../types/sessionTypes'
+import type { SessionTemplatePayload } from '@/features/templates/types/templateTypes'
 
 const TYPE_ICONS: Record<SessionType, ReactElement> = {
   hike: <HikingIcon />,
@@ -39,8 +41,23 @@ const sessionDate = new Intl.DateTimeFormat('en-AU', {
 interface SessionsListProps {
   teamId: string
   uid: string
+  isCaptain?: boolean
   sessions: Session[]
   onEdit: (session: Session) => void
+}
+
+// R12.3: one action turns a logged session into a reusable template.
+function toTemplatePayload(session: Session): SessionTemplatePayload {
+  return {
+    type: session.type,
+    durationMin: session.durationMin,
+    ...(session.distanceKm !== null ? { distanceKm: session.distanceKm } : {}),
+    ...(session.elevationGainM !== null
+      ? { elevationGainM: session.elevationGainM }
+      : {}),
+    perceivedEffort: session.perceivedEffort,
+    ...(session.notes ? { notes: session.notes } : {}),
+  }
 }
 
 function summarise(session: Session): string {
@@ -54,6 +71,7 @@ function summarise(session: Session): string {
 export default function SessionsList({
   teamId,
   uid,
+  isCaptain = false,
   sessions,
   onEdit,
 }: SessionsListProps) {
@@ -61,6 +79,7 @@ export default function SessionsList({
   const [deleteSession] = useDeleteSessionMutation()
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [menuSession, setMenuSession] = useState<Session | null>(null)
+  const [templateSource, setTemplateSource] = useState<Session | null>(null)
 
   const nameOf = (memberUid: string) =>
     members.find((member) => member.uid === memberUid)?.displayName ?? 'Teammate'
@@ -138,6 +157,14 @@ export default function SessionsList({
         <MenuItem
           onClick={() => {
             setMenuAnchor(null)
+            if (menuSession) setTemplateSource(menuSession)
+          }}
+        >
+          Save as template
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setMenuAnchor(null)
             if (menuSession) {
               void deleteSession({ teamId, sessionId: menuSession.id })
             }
@@ -146,6 +173,21 @@ export default function SessionsList({
           Delete
         </MenuItem>
       </Menu>
+      <SaveTemplateDialog
+        open={Boolean(templateSource)}
+        onClose={() => setTemplateSource(null)}
+        kind="session"
+        payload={templateSource ? toTemplatePayload(templateSource) : null}
+        defaultName={
+          templateSource
+            ? `${SESSION_TYPE_LABELS[templateSource.type]} ${templateSource.durationMin}min`
+            : ''
+        }
+        createdFrom="history"
+        uid={uid}
+        teamId={teamId}
+        isCaptain={isCaptain}
+      />
     </>
   )
 }
