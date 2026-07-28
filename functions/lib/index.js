@@ -1,12 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onMealWritten = exports.nutritionReviewJob = exports.suggestionJob = exports.dailyJob = exports.onMealPlanRequest = exports.onPlanRequest = void 0;
+exports.onMealWritten = exports.nutritionReviewJob = exports.suggestionJob = exports.dailyJob = exports.onMealPlanRequest = exports.onStrengthAdviceRequest = exports.onPlanRequest = void 0;
 const v2_1 = require("firebase-functions/v2");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const params_1 = require("firebase-functions/params");
 const firebase_functions_1 = require("firebase-functions");
 const onPlanRequest_1 = require("./triggers/onPlanRequest");
+const onStrengthAdviceRequest_1 = require("./triggers/onStrengthAdviceRequest");
 const onMealPlanRequest_1 = require("./triggers/onMealPlanRequest");
 const onMealWritten_1 = require("./triggers/onMealWritten");
 const computeMetrics_1 = require("./jobs/computeMetrics");
@@ -27,6 +28,21 @@ exports.onPlanRequest = (0, firestore_1.onDocumentCreated)({
         geminiApiKey: GEMINI_API_KEY.value(),
         teamId: event.params.teamId,
         requestId: event.params.requestId,
+    });
+});
+// F3.1: AI strength coach queue — request doc is keyed by uid and reset to
+// 'pending' on re-request, so onDocumentWritten (not Created) is the trigger;
+// the handler ignores writes whose status isn't 'pending'.
+exports.onStrengthAdviceRequest = (0, firestore_1.onDocumentWritten)({
+    document: 'teams/{teamId}/strengthAdviceRequests/{uid}',
+    secrets: [GEMINI_API_KEY],
+}, async (event) => {
+    if (event.data?.after.data()?.status !== 'pending')
+        return;
+    await (0, onStrengthAdviceRequest_1.handleStrengthAdviceRequest)({
+        geminiApiKey: GEMINI_API_KEY.value(),
+        teamId: event.params.teamId,
+        uid: event.params.uid,
     });
 });
 // F13A: meal plan generation queue (spec v1.2) — same request-doc pattern.

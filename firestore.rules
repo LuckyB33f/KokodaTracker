@@ -58,12 +58,12 @@ service cloud.firestore {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }
 
-      // F12: personal templates (session + mealDay).
+      // F12: personal templates (session + mealDay + exercise presets).
       match /templates/{templateId} {
         allow read, delete: if request.auth != null && request.auth.uid == uid;
         allow create, update: if request.auth != null && request.auth.uid == uid
           && request.resource.data.keys().hasOnly(['kind', 'name', 'payload', 'useCount', 'createdFrom', 'createdAt'])
-          && request.resource.data.kind in ['session', 'mealDay']
+          && request.resource.data.kind in ['session', 'mealDay', 'exercise']
           && request.resource.data.name is string
           && request.resource.data.name.size() >= 1
           && request.resource.data.name.size() <= 60;
@@ -139,7 +139,7 @@ service cloud.firestore {
         allow read: if isMember(teamId);
         allow create: if isMember(teamId)
           && request.resource.data.uid == request.auth.uid
-          && request.resource.data.keys().hasOnly(['uid', 'type', 'source', 'startedAt', 'durationMin', 'distanceKm', 'elevationGainM', 'avgPaceMinPerKm', 'route', 'perceivedEffort', 'notes', 'weekKey', 'createdAt'])
+          && request.resource.data.keys().hasOnly(['uid', 'type', 'source', 'startedAt', 'durationMin', 'distanceKm', 'elevationGainM', 'avgPaceMinPerKm', 'route', 'exercises', 'perceivedEffort', 'notes', 'weekKey', 'createdAt'])
           && request.resource.data.type in ['hike', 'run', 'walk', 'stairs', 'strength', 'other']
           && request.resource.data.source in ['gps', 'manual']
           && request.resource.data.startedAt is timestamp
@@ -148,6 +148,7 @@ service cloud.firestore {
           && request.resource.data.durationMin <= 1440
           && (!('distanceKm' in request.resource.data) || (request.resource.data.distanceKm >= 0 && request.resource.data.distanceKm <= 100))
           && (!('elevationGainM' in request.resource.data) || (request.resource.data.elevationGainM >= 0 && request.resource.data.elevationGainM <= 5000))
+          && (!('exercises' in request.resource.data) || (request.resource.data.exercises is list && request.resource.data.exercises.size() <= 20))
           && request.resource.data.perceivedEffort is int
           && request.resource.data.perceivedEffort >= 1
           && request.resource.data.perceivedEffort <= 10
@@ -217,7 +218,7 @@ service cloud.firestore {
         allow delete: if isCaptain(teamId);
         allow create, update: if isCaptain(teamId)
           && request.resource.data.keys().hasOnly(['kind', 'name', 'payload', 'useCount', 'createdFrom', 'createdAt'])
-          && request.resource.data.kind in ['session', 'mealDay']
+          && request.resource.data.kind in ['session', 'mealDay', 'exercise']
           && request.resource.data.name is string
           && request.resource.data.name.size() >= 1
           && request.resource.data.name.size() <= 60;
@@ -235,6 +236,19 @@ service cloud.firestore {
           && (request.resource.data.scope == 'self'
               || (request.resource.data.scope == 'team' && isCaptain(teamId)));
         allow update, delete: if false;
+      }
+
+      // F3.1: AI strength coach queue — one doc per member (docId == uid), so
+      // a re-request simply resets the same doc to 'pending' and the trigger
+      // (Admin SDK) overwrites it with the advice. No index, no growth.
+      match /strengthAdviceRequests/{memberUid} {
+        allow read: if isMember(teamId) && request.auth.uid == memberUid;
+        allow create, update: if isMember(teamId)
+          && request.auth.uid == memberUid
+          && request.resource.data.keys().hasOnly(['requestedBy', 'status', 'createdAt'])
+          && request.resource.data.requestedBy == request.auth.uid
+          && request.resource.data.status == 'pending';
+        allow delete: if false;
       }
 
       // F13B/F6: function-written fuelling aggregate — counts + latest review

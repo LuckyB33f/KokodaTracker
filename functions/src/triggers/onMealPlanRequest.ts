@@ -2,7 +2,7 @@ import { logger } from 'firebase-functions'
 import { Timestamp } from 'firebase-admin/firestore'
 import { z } from 'zod'
 import { db } from '../lib/admin'
-import { geminiJson } from '../lib/gemini'
+import { GEMINI_MODEL, geminiJson, isGeminiApiError } from '../lib/gemini'
 import { brisbaneWeekDates, todayBrisbane, weekKeyFor } from '../lib/weekKey'
 import {
   DEFAULT_MEAL_PREFS,
@@ -211,8 +211,12 @@ export async function handleMealPlanRequest(args: {
             }
             problems = issues.join('; ')
           } catch (error) {
+            // Billing/quota/auth errors can't be repaired by re-prompting —
+            // bubble up so the member sees the real reason.
+            if (isGeminiApiError(error)) throw error
             problems = String(error).slice(0, 200)
           }
+          logger.warn('meal plan attempt rejected', { uid, attempt, problems })
           attemptPrompt = `${prompt}\n\nYour previous answer was invalid (${problems.slice(0, 600)}). Return ONLY corrected JSON matching the schema and every rule above.`
         }
         if (!parsed) {
@@ -229,7 +233,7 @@ export async function handleMealPlanRequest(args: {
         const batch = db.batch()
         batch.set(planRef, {
           generatedAt: new Date(),
-          model: 'gemini-2.5-flash',
+          model: GEMINI_MODEL,
           promptVersion: MEAL_PLAN_PROMPT_VERSION,
           phase,
           weekKey,

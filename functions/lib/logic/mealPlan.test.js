@@ -96,7 +96,7 @@ const BASE_ARGS = {
         phase: 'base',
         weekKey: '2026-W31',
         weekDates: WEEK,
-        prefs: { mainMeals: 3, snacks: 2, duringTraining: true, macroFocus: 'carb' },
+        prefs: { ...mealPlan_1.DEFAULT_MEAL_PREFS, macroFocus: 'carb' },
         library: [{ id: 'abc123', text: 'Chicken and rice', tag: 'protein', favourite: true }],
         trainingDays: [
             { date: WEEK[5], title: 'Team hike', targetType: 'distance', targetValue: 15 },
@@ -109,6 +109,66 @@ const BASE_ARGS = {
     strict_1.default.ok(prompt.includes('NO calorie counts'));
     strict_1.default.ok(prompt.includes('96 km'));
     strict_1.default.ok(!prompt.includes('weight-loss framing is fine'));
+});
+(0, node_test_1.default)('prompt: questionnaire prefs become taste context and hard rules', () => {
+    const prompt = (0, mealPlan_1.buildMealPlanPrompt)({
+        displayName: 'Jason',
+        eventDate: '2027-06-19',
+        distanceKm: 96,
+        phase: 'base',
+        weekKey: '2026-W31',
+        weekDates: WEEK,
+        prefs: {
+            ...mealPlan_1.DEFAULT_MEAL_PREFS,
+            dietStyle: 'vegetarian',
+            favouriteFoods: ['Burritos', 'Overnight oats'],
+            foodsToTry: ['Poke bowls'],
+            avoidFoods: ['Peanuts', 'Mushrooms'],
+            extraNotes: 'I batch cook Sundays',
+        },
+        library: [],
+        trainingDays: [],
+    });
+    strict_1.default.ok(prompt.includes('STRICT vegetarian'));
+    strict_1.default.ok(prompt.includes('Burritos, Overnight oats'));
+    strict_1.default.ok(prompt.includes('want to try: Poke bowls'));
+    strict_1.default.ok(prompt.includes('NEVER include these foods'));
+    strict_1.default.ok(prompt.includes('Peanuts, Mushrooms'));
+    strict_1.default.ok(prompt.includes('batch cook Sundays'));
+});
+(0, node_test_1.default)('prompt: default prefs add no taste or diet sections', () => {
+    const prompt = (0, mealPlan_1.buildMealPlanPrompt)({
+        displayName: 'Jason',
+        eventDate: '2027-06-19',
+        distanceKm: 96,
+        phase: 'base',
+        weekKey: '2026-W31',
+        weekDates: WEEK,
+        prefs: mealPlan_1.DEFAULT_MEAL_PREFS,
+        library: [],
+        trainingDays: [],
+    });
+    strict_1.default.ok(!prompt.includes('Dietary rules'));
+    strict_1.default.ok(!prompt.includes('Foods they love'));
+});
+(0, node_test_1.default)('mealPlanIssues: avoided foods in meal text are flagged for repair', () => {
+    const days = validWeek();
+    days[2].meals[2] = {
+        slot: 'dinner',
+        libraryRefId: null,
+        text: 'Peanut satay noodles',
+        tag: null,
+    };
+    const issues = (0, mealPlan_1.mealPlanIssues)(days, {
+        ...BASE_ARGS,
+        prefs: { ...mealPlan_1.DEFAULT_MEAL_PREFS, avoidFoods: ['peanut'] },
+    });
+    strict_1.default.ok(issues.some((i) => i.includes('avoided food "peanut"')));
+    // Clean plan with the same avoid list passes.
+    strict_1.default.deepEqual((0, mealPlan_1.mealPlanIssues)(validWeek(), {
+        ...BASE_ARGS,
+        prefs: { ...mealPlan_1.DEFAULT_MEAL_PREFS, avoidFoods: ['peanut'] },
+    }), []);
 });
 (0, node_test_1.default)('schema: rejects wrong slot and >10 meals per day', () => {
     const bad = {

@@ -1,5 +1,30 @@
-// Minimal Gemini REST client (spec §2.1: gemini-2.5-flash, server-side only).
-const MODEL = 'gemini-2.5-flash'
+// Minimal Gemini REST client (spec §2.1: flash tier, server-side only).
+// The rolling alias tracks Google's current flash model — pinned versions
+// get retired for "new users" after billing-plan migrations (gemini-2.5-flash
+// started 404ing in July 2026), so the alias is the stable choice here.
+export const GEMINI_MODEL = 'gemini-flash-latest'
+const MODEL = GEMINI_MODEL
+
+// API-level failures (billing, quota, auth) are tagged code 'gemini-api' so
+// callers can stop retrying and surface the real reason instead of
+// "invalid response twice". Messages are user-facing.
+function apiError(status: number, detail: string): Error {
+  const message =
+    status === 429
+      ? 'The AI service is out of credits or quota — check Gemini API billing in AI Studio, then try again.'
+      : status === 401 || status === 403
+        ? 'The AI service rejected the API key — check the GEMINI_API_KEY secret.'
+        : `The AI service returned an error (HTTP ${status}) — try again shortly.`
+  return Object.assign(new Error(message), {
+    code: 'gemini-api',
+    status,
+    detail: detail.slice(0, 300),
+  })
+}
+
+export function isGeminiApiError(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === 'gemini-api'
+}
 
 export async function geminiJson(
   apiKey: string,
@@ -21,7 +46,7 @@ export async function geminiJson(
   )
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
-    throw new Error(`Gemini HTTP ${response.status}: ${detail.slice(0, 300)}`)
+    throw apiError(response.status, detail)
   }
   const payload = (await response.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[]
@@ -48,7 +73,7 @@ export async function geminiText(
   )
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
-    throw new Error(`Gemini HTTP ${response.status}: ${detail.slice(0, 300)}`)
+    throw apiError(response.status, detail)
   }
   const payload = (await response.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[]

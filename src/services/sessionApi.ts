@@ -16,6 +16,7 @@ import { auth, db } from '@/lib/firebase'
 import { weekKeyFor } from '@/utils/weekKey'
 import type {
   Session,
+  SessionExercise,
   SessionInput,
   SessionRoute,
 } from '@/features/sessions/types/sessionTypes'
@@ -49,6 +50,7 @@ function toSession(id: string, data: Record<string, unknown>): Session {
     elevationGainM: (data.elevationGainM as number | undefined) ?? null,
     avgPaceMinPerKm: (data.avgPaceMinPerKm as number | undefined) ?? null,
     route: (data.route as SessionRoute | undefined) ?? null,
+    exercises: (data.exercises as SessionExercise[] | undefined) ?? null,
     perceivedEffort: data.perceivedEffort as number,
     notes: (data.notes as string | undefined) ?? '',
     weekKey: data.weekKey as string,
@@ -118,6 +120,9 @@ export const sessionApi = baseApi.injectEndpoints({
               }),
               ...(pace !== undefined && { avgPaceMinPerKm: pace }),
               ...(input.route !== undefined && { route: input.route }),
+              ...(input.exercises !== undefined && {
+                exercises: input.exercises,
+              }),
               perceivedEffort: input.perceivedEffort,
               ...(input.notes ? { notes: input.notes } : {}),
               weekKey: weekKeyFor(input.startedAt),
@@ -146,6 +151,7 @@ export const sessionApi = baseApi.injectEndpoints({
             distanceKm: input.distanceKm ?? deleteField(),
             elevationGainM: input.elevationGainM ?? deleteField(),
             avgPaceMinPerKm: pace ?? deleteField(),
+            exercises: input.exercises ?? deleteField(),
             perceivedEffort: input.perceivedEffort,
             notes: input.notes ?? deleteField(),
             weekKey: weekKeyFor(input.startedAt),

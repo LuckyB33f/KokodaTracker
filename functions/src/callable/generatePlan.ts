@@ -1,8 +1,9 @@
 import { HttpsError } from 'firebase-functions/v2/https'
+import { logger } from 'firebase-functions'
 import { Timestamp } from 'firebase-admin/firestore'
 import { z } from 'zod'
 import { db } from '../lib/admin'
-import { geminiJson } from '../lib/gemini'
+import { GEMINI_MODEL, geminiJson, isGeminiApiError } from '../lib/gemini'
 import { brisbaneWeekDates, weekKeyFor, todayBrisbane } from '../lib/weekKey'
 import { loadCeiling, type Verdict } from '../logic/verdict'
 
@@ -236,8 +237,14 @@ export async function generatePlanHandler({
       }
       problems = issues.join('; ')
     } catch (error) {
+      // Billing/quota/auth failures can't be repaired by re-prompting —
+      // surface the real reason instead of "invalid plan twice".
+      if (isGeminiApiError(error)) {
+        throw new HttpsError('unavailable', (error as Error).message)
+      }
       problems = String(error).slice(0, 200)
     }
+    logger.warn('plan attempt rejected', { attempt, problems })
     attemptPrompt = `${prompt}\n\nYour previous answer was invalid (${problems.slice(
       0,
       600,
@@ -279,7 +286,7 @@ export async function generatePlanHandler({
   const planRef = teamRef.collection('plans').doc()
   batch.set(planRef, {
     generatedAt: new Date(),
-    model: 'gemini-2.5-flash',
+    model: GEMINI_MODEL,
     promptVersion: PROMPT_VERSION,
     phase,
     weekKey,

@@ -1,7 +1,10 @@
-import type { SessionType } from '@/features/sessions/types/sessionTypes'
+import type {
+  SessionExercise,
+  SessionType,
+} from '@/features/sessions/types/sessionTypes'
 import type { MealSlot, MealTag } from '@/features/meals/types/mealTypes'
 
-export type TemplateKind = 'session' | 'mealDay'
+export type TemplateKind = 'session' | 'mealDay' | 'exercise'
 export type TemplateScope = 'personal' | 'team'
 export type TemplateCreatedFrom = 'manual' | 'history' | 'seed'
 
@@ -11,8 +14,15 @@ export interface SessionTemplatePayload {
   durationMin: number
   distanceKm?: number
   elevationGainM?: number
+  exercises?: SessionExercise[]
   perceivedEffort: number
   notes?: string
+}
+
+// F3.1: a single-exercise preset (name + default sets/weights) for one-tap
+// adds in the strength editor.
+export interface ExerciseTemplatePayload {
+  exercise: SessionExercise
 }
 
 export interface MealDayTemplateItem {
@@ -27,7 +37,10 @@ export interface MealDayTemplatePayload {
   items: MealDayTemplateItem[]
 }
 
-export type TemplatePayload = SessionTemplatePayload | MealDayTemplatePayload
+export type TemplatePayload =
+  | SessionTemplatePayload
+  | MealDayTemplatePayload
+  | ExerciseTemplatePayload
 
 // Mirrors users/{uid}/templates and teams/{teamId}/templates (MVP-SPEC v1.2
 // F12). scope is a client-side annotation from which collection it streamed.
@@ -57,4 +70,13 @@ export function isSessionTemplate(t: Template): t is SessionTemplate {
 
 export function isMealDayTemplate(t: Template): t is MealDayTemplate {
   return t.kind === 'mealDay'
+}
+
+export interface ExerciseTemplate extends Template {
+  kind: 'exercise'
+  payload: ExerciseTemplatePayload
+}
+
+export function isExerciseTemplate(t: Template): t is ExerciseTemplate {
+  return t.kind === 'exercise'
 }

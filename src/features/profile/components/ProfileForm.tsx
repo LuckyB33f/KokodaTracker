@@ -54,7 +54,10 @@ export default function ProfileForm({
           units: values.units,
           theme: values.theme,
           aiMealsEnabled: values.aiMealsEnabled,
+          // Spread first: the food questionnaire (F13C) also lives in
+          // mealPrefs and must survive a profile save.
           mealPrefs: {
+            ...profile.mealPrefs,
             mainMeals: values.mainMeals,
             snacks: values.snacks,
             duringTraining: values.duringTraining,

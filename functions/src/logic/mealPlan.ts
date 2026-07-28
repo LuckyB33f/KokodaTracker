@@ -34,11 +34,20 @@ export const mealPlanSchema = z.object({
 
 export type MealPlanDays = z.infer<typeof mealPlanSchema>['days']
 
+export type DietStyle = 'none' | 'vegetarian' | 'vegan' | 'pescatarian'
+
+// Mirrors src/features/profile/types/profileTypes.ts MealPrefs.
 export interface MealPrefs {
   mainMeals: number
   snacks: number
   duringTraining: boolean
   macroFocus: 'carb' | 'protein' | 'balanced'
+  dietStyle: DietStyle
+  favouriteFoods: string[]
+  foodsToTry: string[]
+  avoidFoods: string[]
+  extraNotes: string
+  questionnaireDone: boolean
 }
 
 export const DEFAULT_MEAL_PREFS: MealPrefs = {
@@ -46,6 +55,27 @@ export const DEFAULT_MEAL_PREFS: MealPrefs = {
   snacks: 2,
   duringTraining: true,
   macroFocus: 'balanced',
+  dietStyle: 'none',
+  favouriteFoods: [],
+  foodsToTry: [],
+  avoidFoods: [],
+  extraNotes: '',
+  questionnaireDone: false,
+}
+
+const DIET_RULE: Record<Exclude<DietStyle, 'none'>, string> = {
+  vegetarian: 'STRICT vegetarian — no meat, poultry, fish or seafood in any meal.',
+  vegan: 'STRICT vegan — no meat, fish, dairy, eggs or honey in any meal.',
+  pescatarian: 'Pescatarian — fish and seafood are fine; no other meat or poultry.',
+}
+
+// Clamp free-text lists before they hit the prompt (defensive: prefs are
+// client-written).
+function cleanList(items: string[] | undefined, max = 15): string[] {
+  return (items ?? [])
+    .map((item) => String(item).trim().slice(0, 60))
+    .filter(Boolean)
+    .slice(0, max)
 }
 
 export interface LibraryEntry {
@@ -101,6 +131,31 @@ export function buildMealPlanPrompt(args: {
     ? `Include "during" slot fuel ONLY on the training days listed above (30-60g carbs/hr style on long hikes).`
     : `NEVER use the "during" slot — this member doesn't log during-training fuel.`
 
+  // F13C questionnaire → taste context + hard dietary rules.
+  const favourites = cleanList(args.prefs.favouriteFoods)
+  const toTry = cleanList(args.prefs.foodsToTry)
+  const avoid = cleanList(args.prefs.avoidFoods)
+  const notes = (args.prefs.extraNotes ?? '').trim().slice(0, 300)
+  const tasteLines = [
+    favourites.length > 0
+      ? `Foods they love (lean on these often): ${favourites.join(', ')}.`
+      : null,
+    toTry.length > 0
+      ? `Foods they want to try: ${toTry.join(', ')}. Work 3-5 of these into the week as simple, practical meals (libraryRefId null).`
+      : null,
+    notes ? `Their own words about food preferences: "${notes}"` : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+  const dietRules = [
+    args.prefs.dietStyle !== 'none' ? `- ${DIET_RULE[args.prefs.dietStyle]}` : null,
+    avoid.length > 0
+      ? `- NEVER include these foods in any meal (allergies/dislikes): ${avoid.join(', ')}.`
+      : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+
   return `You are a practical endurance-training fuelling assistant writing ONE week of meals for ${args.displayName}, who is training for the Kokoda Challenge (${args.distanceKm} km trail event on ${args.eventDate}). Training phase: ${args.phase}. Week: ${args.weekKey}.
 
 Their planned training this week:
@@ -108,7 +163,7 @@ ${trainingLines}
 
 Their meal library (foods they actually eat — strongly prefer these):
 ${libraryLines}
-
+${tasteLines ? `\n${tasteLines}\n` : ''}${dietRules ? `\nDietary rules (non-negotiable):\n${dietRules}\n` : ''}
 Structure rules (non-negotiable):
 - Return JSON ONLY matching: {"days":[{"date":"YYYY-MM-DD","meals":[{"slot":"breakfast|lunch|dinner|snack|during","libraryRefId":"<id or null>","text":"...","tag":"carb|protein|light" or null}]} x7]}
 - Use ONLY these dates, one entry each, in order: ${args.weekDates.join(', ')}.
@@ -168,6 +223,15 @@ export function mealPlanIssues(
       }
       if (meal.libraryRefId !== null && !args.libraryIds.has(meal.libraryRefId)) {
         issues.push(`unknown libraryRefId "${meal.libraryRefId}"`)
+      }
+      // Deterministic allergy/dislike guard — the prompt already forbids
+      // these; a slip goes back to Gemini for repair. Substring match on
+      // terms ≥3 chars keeps false positives rare.
+      const text = meal.text.toLowerCase()
+      for (const term of cleanList(args.prefs.avoidFoods)) {
+        if (term.length >= 3 && text.includes(term.toLowerCase())) {
+          issues.push(`"${meal.text}" on ${day.date} contains avoided food "${term}"`)
+        }
       }
     }
   }

@@ -25,9 +25,15 @@ function summarise(template: Template): string | undefined {
     const parts = [`${p.durationMin} min`]
     if (p.distanceKm) parts.push(`${p.distanceKm} km`)
     if (p.elevationGainM) parts.push(`${p.elevationGainM} m ↑`)
+    if (p.exercises && p.exercises.length > 0) {
+      parts.push(
+        `${p.exercises.length} exercise${p.exercises.length === 1 ? '' : 's'}`,
+      )
+    }
     parts.push(`effort ${p.perceivedEffort}/10`)
     return parts.join(' · ')
   }
+  if (template.kind === 'exercise') return undefined
   const items = 'items' in template.payload ? template.payload.items : []
   return `${items.length} meal${items.length === 1 ? '' : 's'}`
 }

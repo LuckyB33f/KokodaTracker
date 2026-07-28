@@ -156,8 +156,13 @@ async function handleMealPlanRequest(args) {
                         problems = issues.join('; ');
                     }
                     catch (error) {
+                        // Billing/quota/auth errors can't be repaired by re-prompting —
+                        // bubble up so the member sees the real reason.
+                        if ((0, gemini_1.isGeminiApiError)(error))
+                            throw error;
                         problems = String(error).slice(0, 200);
                     }
+                    firebase_functions_1.logger.warn('meal plan attempt rejected', { uid, attempt, problems });
                     attemptPrompt = `${prompt}\n\nYour previous answer was invalid (${problems.slice(0, 600)}). Return ONLY corrected JSON matching the schema and every rule above.`;
                 }
                 if (!parsed) {
@@ -172,7 +177,7 @@ async function handleMealPlanRequest(args) {
                 const batch = admin_1.db.batch();
                 batch.set(planRef, {
                     generatedAt: new Date(),
-                    model: 'gemini-2.5-flash',
+                    model: gemini_1.GEMINI_MODEL,
                     promptVersion: mealPlan_1.MEAL_PLAN_PROMPT_VERSION,
                     phase,
                     weekKey,

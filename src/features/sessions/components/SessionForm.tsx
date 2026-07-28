@@ -11,9 +11,12 @@ import {
   useAddSessionMutation,
   useUpdateSessionMutation,
 } from '@/services/sessionApi'
+import ExerciseEditor from './ExerciseEditor'
 import {
   SESSION_TYPES,
   SESSION_TYPE_LABELS,
+  fromExerciseFormValues,
+  toExerciseFormValues,
 } from '../types/sessionTypes'
 import type {
   Session,
@@ -24,6 +27,7 @@ import { sessionSchema } from '../validation/sessionValidationSchemas'
 
 interface SessionFormProps {
   teamId: string
+  uid: string | null // for personal exercise presets
   session?: Session // present = edit mode
   // From a template (R12.1): merged into the blank form's initial values.
   prefill?: Partial<SessionFormValues>
@@ -38,9 +42,15 @@ function toDatetimeLocal(ms: number): string {
 }
 
 function toInput(values: SessionFormValues): SessionInput {
-  const distance = values.distanceKm === '' ? undefined : Number(values.distanceKm)
+  // Strength sessions carry exercises instead of distance/elevation.
+  const strength = values.type === 'strength'
+  const distance =
+    strength || values.distanceKm === '' ? undefined : Number(values.distanceKm)
   const elevation =
-    values.elevationGainM === '' ? undefined : Number(values.elevationGainM)
+    strength || values.elevationGainM === ''
+      ? undefined
+      : Number(values.elevationGainM)
+  const exercises = strength ? fromExerciseFormValues(values.exercises) : []
   return {
     type: values.type,
     source: 'manual',
@@ -48,6 +58,7 @@ function toInput(values: SessionFormValues): SessionInput {
     durationMin: Number(values.durationMin),
     distanceKm: distance,
     elevationGainM: elevation,
+    exercises: exercises.length > 0 ? exercises : undefined,
     perceivedEffort: values.perceivedEffort,
     notes: values.notes.trim() || undefined,
   }
@@ -55,6 +66,7 @@ function toInput(values: SessionFormValues): SessionInput {
 
 export default function SessionForm({
   teamId,
+  uid,
   session,
   prefill,
   onSaved,
@@ -72,6 +84,7 @@ export default function SessionForm({
           distanceKm: session.distanceKm === null ? '' : String(session.distanceKm),
           elevationGainM:
             session.elevationGainM === null ? '' : String(session.elevationGainM),
+          exercises: toExerciseFormValues(session.exercises ?? []),
           perceivedEffort: session.perceivedEffort,
           notes: session.notes,
         }
@@ -81,6 +94,7 @@ export default function SessionForm({
           durationMin: '',
           distanceKm: '',
           elevationGainM: '',
+          exercises: [],
           perceivedEffort: 5,
           notes: '',
           ...prefill,
@@ -103,9 +117,13 @@ export default function SessionForm({
     },
   })
 
+  const isStrength = formik.values.type === 'strength'
+
   return (
     <form onSubmit={formik.handleSubmit} noValidate>
-      <Stack spacing={2}>
+      {/* pt: MUI zeroes DialogContent's top padding after a DialogTitle,
+          which clips the first field's floating outlined label. */}
+      <Stack spacing={2} sx={{ pt: 1 }}>
         {formError && <Alert severity="error">{formError}</Alert>}
         <TextField
           id="type"
@@ -145,7 +163,18 @@ export default function SessionForm({
           error={formik.touched.durationMin && Boolean(formik.errors.durationMin)}
           helperText={formik.touched.durationMin && formik.errors.durationMin}
         />
-        <Stack direction="row" spacing={2}>
+        {isStrength && (
+          <ExerciseEditor
+            uid={uid}
+            exercises={formik.values.exercises}
+            errors={formik.errors.exercises}
+            showErrors={formik.submitCount > 0}
+            onChange={(next) => {
+              void formik.setFieldValue('exercises', next)
+            }}
+          />
+        )}
+        <Stack direction="row" spacing={2} sx={{ display: isStrength ? 'none' : undefined }}>
           <TextField
             id="distanceKm"
             name="distanceKm"

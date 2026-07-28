@@ -21,6 +21,7 @@ import SectionCard from '@/components/common/SectionCard'
 import SEO from '@/components/common/SEO'
 import SessionForm from '@/features/sessions/components/SessionForm'
 import SessionsList from '@/features/sessions/components/SessionsList'
+import StrengthCoachCard from '@/features/sessions/components/StrengthCoachCard'
 import TemplatePicker from '@/features/templates/components/TemplatePicker'
 import { seedSessionTemplates } from '@/features/templates/utils/seedTemplates'
 import { useActiveTeam } from '@/features/team/hooks/useActiveTeam'
@@ -32,6 +33,7 @@ import {
   useGetTeamTemplatesQuery,
 } from '@/services/templateApi'
 import { phaseFor } from '@/utils/trainingPhase'
+import { toExerciseFormValues } from '@/features/sessions/types/sessionTypes'
 import { isSessionTemplate } from '@/features/templates/types/templateTypes'
 import type { Template } from '@/features/templates/types/templateTypes'
 import type {
@@ -108,6 +110,7 @@ export default function SessionsPage() {
         distanceKm: p.distanceKm !== undefined ? String(p.distanceKm) : '',
         elevationGainM:
           p.elevationGainM !== undefined ? String(p.elevationGainM) : '',
+        exercises: toExerciseFormValues(p.exercises ?? []),
         perceivedEffort: p.perceivedEffort,
         notes: p.notes ?? '',
       },
@@ -161,6 +164,27 @@ export default function SessionsPage() {
           </Stack>
         }
       />
+      {uid && (
+        <StrengthCoachCard
+          teamId={teamId}
+          uid={uid}
+          onLogWorkout={(workout) =>
+            setStep({
+              kind: 'form',
+              prefill: {
+                type: 'strength',
+                exercises: workout.map((item) => ({
+                  name: item.name,
+                  sets: Array.from({ length: item.sets }, () => ({
+                    reps: String(item.reps),
+                    weightKg: String(item.weightKg),
+                  })),
+                })),
+              },
+            })
+          }
+        />
+      )}
       <SectionCard>
         <SessionsList
           teamId={teamId}
@@ -217,6 +241,7 @@ export default function SessionsPage() {
           {step.kind === 'form' && (
             <SessionForm
               teamId={teamId}
+              uid={uid ?? null}
               prefill={step.prefill}
               onSaved={close}
             />
@@ -224,6 +249,7 @@ export default function SessionsPage() {
           {step.kind === 'edit' && (
             <SessionForm
               teamId={teamId}
+              uid={uid ?? null}
               session={step.session}
               onSaved={close}
             />

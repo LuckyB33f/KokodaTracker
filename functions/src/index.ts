@@ -7,6 +7,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { handlePlanRequest } from './triggers/onPlanRequest'
+import { handleStrengthAdviceRequest } from './triggers/onStrengthAdviceRequest'
 import { handleMealPlanRequest } from './triggers/onMealPlanRequest'
 import { handleMealWritten } from './triggers/onMealWritten'
 import { computeMetrics } from './jobs/computeMetrics'
@@ -32,6 +33,24 @@ export const onPlanRequest = onDocumentCreated(
       geminiApiKey: GEMINI_API_KEY.value(),
       teamId: event.params.teamId,
       requestId: event.params.requestId,
+    })
+  },
+)
+
+// F3.1: AI strength coach queue — request doc is keyed by uid and reset to
+// 'pending' on re-request, so onDocumentWritten (not Created) is the trigger;
+// the handler ignores writes whose status isn't 'pending'.
+export const onStrengthAdviceRequest = onDocumentWritten(
+  {
+    document: 'teams/{teamId}/strengthAdviceRequests/{uid}',
+    secrets: [GEMINI_API_KEY],
+  },
+  async (event) => {
+    if (event.data?.after.data()?.status !== 'pending') return
+    await handleStrengthAdviceRequest({
+      geminiApiKey: GEMINI_API_KEY.value(),
+      teamId: event.params.teamId,
+      uid: event.params.uid,
     })
   },
 )

@@ -4,6 +4,7 @@ exports.PROMPT_VERSION = void 0;
 exports.planIssues = planIssues;
 exports.generatePlanHandler = generatePlanHandler;
 const https_1 = require("firebase-functions/v2/https");
+const firebase_functions_1 = require("firebase-functions");
 const firestore_1 = require("firebase-admin/firestore");
 const zod_1 = require("zod");
 const admin_1 = require("../lib/admin");
@@ -163,8 +164,14 @@ async function generatePlanHandler({ geminiApiKey, uid, }) {
             problems = issues.join('; ');
         }
         catch (error) {
+            // Billing/quota/auth failures can't be repaired by re-prompting —
+            // surface the real reason instead of "invalid plan twice".
+            if ((0, gemini_1.isGeminiApiError)(error)) {
+                throw new https_1.HttpsError('unavailable', error.message);
+            }
             problems = String(error).slice(0, 200);
         }
+        firebase_functions_1.logger.warn('plan attempt rejected', { attempt, problems });
         attemptPrompt = `${prompt}\n\nYour previous answer was invalid (${problems.slice(0, 600)}). Return ONLY corrected JSON matching the schema and every rule above.`;
     }
     if (!parsed) {
@@ -198,7 +205,7 @@ async function generatePlanHandler({ geminiApiKey, uid, }) {
     const planRef = teamRef.collection('plans').doc();
     batch.set(planRef, {
         generatedAt: new Date(),
-        model: 'gemini-2.5-flash',
+        model: gemini_1.GEMINI_MODEL,
         promptVersion: exports.PROMPT_VERSION,
         phase,
         weekKey,

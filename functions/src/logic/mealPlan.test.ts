@@ -117,7 +117,7 @@ test('prompt: includes prefs structure, dates, library ids and tone rules', () =
     phase: 'base',
     weekKey: '2026-W31',
     weekDates: WEEK,
-    prefs: { mainMeals: 3, snacks: 2, duringTraining: true, macroFocus: 'carb' },
+    prefs: { ...DEFAULT_MEAL_PREFS, macroFocus: 'carb' },
     library: [{ id: 'abc123', text: 'Chicken and rice', tag: 'protein', favourite: true }],
     trainingDays: [
       { date: WEEK[5], title: 'Team hike', targetType: 'distance', targetValue: 15 },
@@ -130,6 +130,72 @@ test('prompt: includes prefs structure, dates, library ids and tone rules', () =
   assert.ok(prompt.includes('NO calorie counts'))
   assert.ok(prompt.includes('96 km'))
   assert.ok(!prompt.includes('weight-loss framing is fine'))
+})
+
+test('prompt: questionnaire prefs become taste context and hard rules', () => {
+  const prompt = buildMealPlanPrompt({
+    displayName: 'Jason',
+    eventDate: '2027-06-19',
+    distanceKm: 96,
+    phase: 'base',
+    weekKey: '2026-W31',
+    weekDates: WEEK,
+    prefs: {
+      ...DEFAULT_MEAL_PREFS,
+      dietStyle: 'vegetarian',
+      favouriteFoods: ['Burritos', 'Overnight oats'],
+      foodsToTry: ['Poke bowls'],
+      avoidFoods: ['Peanuts', 'Mushrooms'],
+      extraNotes: 'I batch cook Sundays',
+    },
+    library: [],
+    trainingDays: [],
+  })
+  assert.ok(prompt.includes('STRICT vegetarian'))
+  assert.ok(prompt.includes('Burritos, Overnight oats'))
+  assert.ok(prompt.includes('want to try: Poke bowls'))
+  assert.ok(prompt.includes('NEVER include these foods'))
+  assert.ok(prompt.includes('Peanuts, Mushrooms'))
+  assert.ok(prompt.includes('batch cook Sundays'))
+})
+
+test('prompt: default prefs add no taste or diet sections', () => {
+  const prompt = buildMealPlanPrompt({
+    displayName: 'Jason',
+    eventDate: '2027-06-19',
+    distanceKm: 96,
+    phase: 'base',
+    weekKey: '2026-W31',
+    weekDates: WEEK,
+    prefs: DEFAULT_MEAL_PREFS,
+    library: [],
+    trainingDays: [],
+  })
+  assert.ok(!prompt.includes('Dietary rules'))
+  assert.ok(!prompt.includes('Foods they love'))
+})
+
+test('mealPlanIssues: avoided foods in meal text are flagged for repair', () => {
+  const days = validWeek()
+  days[2].meals[2] = {
+    slot: 'dinner',
+    libraryRefId: null,
+    text: 'Peanut satay noodles',
+    tag: null,
+  }
+  const issues = mealPlanIssues(days, {
+    ...BASE_ARGS,
+    prefs: { ...DEFAULT_MEAL_PREFS, avoidFoods: ['peanut'] },
+  })
+  assert.ok(issues.some((i) => i.includes('avoided food "peanut"')))
+  // Clean plan with the same avoid list passes.
+  assert.deepEqual(
+    mealPlanIssues(validWeek(), {
+      ...BASE_ARGS,
+      prefs: { ...DEFAULT_MEAL_PREFS, avoidFoods: ['peanut'] },
+    }),
+    [],
+  )
 })
 
 test('schema: rejects wrong slot and >10 meals per day', () => {

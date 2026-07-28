@@ -18,7 +18,7 @@ import EmptyState from '@/components/common/EmptyState'
 import SaveTemplateDialog from '@/features/templates/components/SaveTemplateDialog'
 import { useGetTeamMembersQuery } from '@/services/teamApi'
 import { useDeleteSessionMutation } from '@/services/sessionApi'
-import { SESSION_TYPE_LABELS } from '../types/sessionTypes'
+import { SESSION_TYPE_LABELS, totalVolumeKg } from '../types/sessionTypes'
 import type { Session, SessionType } from '../types/sessionTypes'
 import type { SessionTemplatePayload } from '@/features/templates/types/templateTypes'
 
@@ -55,6 +55,9 @@ function toTemplatePayload(session: Session): SessionTemplatePayload {
     ...(session.elevationGainM !== null
       ? { elevationGainM: session.elevationGainM }
       : {}),
+    ...(session.exercises !== null && session.exercises.length > 0
+      ? { exercises: session.exercises }
+      : {}),
     perceivedEffort: session.perceivedEffort,
     ...(session.notes ? { notes: session.notes } : {}),
   }
@@ -64,6 +67,12 @@ function summarise(session: Session): string {
   const parts = [`${session.durationMin} min`]
   if (session.distanceKm !== null) parts.push(`${session.distanceKm} km`)
   if (session.elevationGainM !== null) parts.push(`${session.elevationGainM} m ↑`)
+  if (session.exercises !== null && session.exercises.length > 0) {
+    parts.push(
+      `${session.exercises.length} exercise${session.exercises.length === 1 ? '' : 's'}`,
+      `${totalVolumeKg(session.exercises).toLocaleString()} kg lifted`,
+    )
+  }
   parts.push(`effort ${session.perceivedEffort}/10`)
   return parts.join(' · ')
 }

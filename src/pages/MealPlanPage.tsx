@@ -12,6 +12,7 @@ import Typography from '@mui/material/Typography'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import EventNoteIcon from '@mui/icons-material/EventNote'
+import TuneIcon from '@mui/icons-material/Tune'
 import ActionButton from '@/components/common/ActionButton'
 import EmptyState from '@/components/common/EmptyState'
 import LoadingState from '@/components/common/LoadingState'
@@ -29,6 +30,8 @@ import {
 } from '@/services/mealPlanApi'
 import { useAddMealMutation, useGetMealLibraryQuery } from '@/services/mealApi'
 import { useGetUserProfileQuery } from '@/services/userApi'
+import MealPrefsDialog from '@/features/meals/components/MealPrefsDialog'
+import { DEFAULT_MEAL_PREFS } from '@/features/profile/types/profileTypes'
 import { currentWeekKey } from '@/utils/weekKey'
 import {
   brisbaneDateTimeToMs,
@@ -61,8 +64,13 @@ export default function MealPlanPage() {
   const [addMeal] = useAddMealMutation()
   const [requestError, setRequestError] = useState<string | null>(null)
   const [loggedSnack, setLoggedSnack] = useState<string | null>(null)
+  const [prefsOpen, setPrefsOpen] = useState(false)
+  // 'gate': opened because Generate was clicked before the questionnaire was
+  // ever filled in — offers "Save & generate".
+  const [prefsMode, setPrefsMode] = useState<'edit' | 'gate'>('edit')
 
   const aiEnabled = profile?.aiMealsEnabled ?? true
+  const prefs = profile?.mealPrefs ?? DEFAULT_MEAL_PREFS
 
   // Same freshness guard as the training plan page: a dead request can't
   // lock the button past 15 minutes.
@@ -84,7 +92,7 @@ export default function MealPlanPage() {
     )
   }
 
-  const generate = async () => {
+  const fireRequest = async () => {
     if (!teamId) return
     setRequestError(null)
     const result = await requestMealPlan({ teamId, scope: 'self' })
@@ -94,6 +102,17 @@ export default function MealPlanPage() {
           'Couldn’t request a meal plan.',
       )
     }
+  }
+
+  // F13C: first generate detours through the food questionnaire so the very
+  // first plan already knows their tastes.
+  const generate = async () => {
+    if (!prefs.questionnaireDone) {
+      setPrefsMode('gate')
+      setPrefsOpen(true)
+      return
+    }
+    await fireRequest()
   }
 
   // R13.3: planned meal → logged meal in one tap, feeding the library loop.
@@ -137,6 +156,17 @@ export default function MealPlanPage() {
             >
               Food diary
             </Button>
+            {aiEnabled && uid && (
+              <Button
+                startIcon={<TuneIcon />}
+                onClick={() => {
+                  setPrefsMode('edit')
+                  setPrefsOpen(true)
+                }}
+              >
+                Preferences
+              </Button>
+            )}
             {aiEnabled && teamId && (
               <ActionButton
                 startIcon={<AutoAwesomeIcon />}
@@ -246,6 +276,18 @@ export default function MealPlanPage() {
         onClose={() => setLoggedSnack(null)}
         message={loggedSnack ? `Logged: ${loggedSnack}` : ''}
       />
+
+      {uid && (
+        <MealPrefsDialog
+          open={prefsOpen}
+          uid={uid}
+          prefs={prefs}
+          onClose={() => setPrefsOpen(false)}
+          onSavedAndGenerate={
+            prefsMode === 'gate' ? () => void fireRequest() : undefined
+          }
+        />
+      )}
     </PageContainer>
   )
 }

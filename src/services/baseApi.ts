@@ -27,6 +27,7 @@ export const baseApi = createApi({
     'PlanRequest',
     'Checkoffs',
     'Suggestion',
+    'StrengthAdvice',
   ],
   endpoints: () => ({}),
 })
